@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "node src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "build": "prisma generate"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
