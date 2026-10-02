@@ -14,6 +14,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const API_URL = 'https://ikonek-app.onrender.com';
+
 export default function SignInScreen({
   onSignIn,
   onNavigateToRegister,
@@ -33,14 +35,19 @@ export default function SignInScreen({
       return;
     }
 
+    if (loading) {
+      return;
+    }
+
     try {
       setLoading(true);
 
       const response = await fetch(
-        'http://192.168.1.51:5000/api/auth/login',
+        `${API_URL}/api/auth/login`,
         {
           method: 'POST',
           headers: {
+            Accept: 'application/json',
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -50,18 +57,35 @@ export default function SignInScreen({
         }
       );
 
-      const data = await response.json();
+      let data;
+
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        throw new Error('The server returned an invalid response.');
+      }
 
       if (!response.ok) {
         Alert.alert(
           'Sign In Error',
-          data.message || 'Invalid email or password.'
+          data?.message || 'Invalid email or password.'
+        );
+        return;
+      }
+
+      if (!data?.token || !data?.user) {
+        Alert.alert(
+          'Sign In Error',
+          'The server did not return valid login information.'
         );
         return;
       }
 
       // Save the JWT token
-      await AsyncStorage.setItem('@ikonek_token', data.token);
+      await AsyncStorage.setItem(
+        '@ikonek_token',
+        data.token
+      );
 
       // Save the logged-in user's information
       await AsyncStorage.setItem(
@@ -71,12 +95,13 @@ export default function SignInScreen({
 
       // Continue to the main app
       onSignIn(data.user);
+
     } catch (error) {
       console.error('Login error:', error);
 
       Alert.alert(
         'Connection Error',
-        'Unable to connect to the server. Make sure the backend is running and your phone is connected to the same Wi-Fi as your computer.'
+        'Unable to connect to the server. Please check your internet connection and try again.'
       );
     } finally {
       setLoading(false);
@@ -109,6 +134,7 @@ export default function SignInScreen({
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="email-address"
+            editable={!loading}
           />
 
           <Text style={styles.label}>Password</Text>
@@ -123,14 +149,20 @@ export default function SignInScreen({
               onChangeText={setPassword}
               autoCapitalize="none"
               autoCorrect={false}
+              editable={!loading}
             />
 
             <TouchableOpacity
               style={styles.eyeIcon}
               onPress={() => setShowPassword(!showPassword)}
+              disabled={loading}
             >
               <Ionicons
-                name={showPassword ? 'eye-outline' : 'eye-off-outline'}
+                name={
+                  showPassword
+                    ? 'eye-outline'
+                    : 'eye-off-outline'
+                }
                 size={20}
                 color="#94A3B8"
               />
@@ -140,8 +172,11 @@ export default function SignInScreen({
           <TouchableOpacity
             style={styles.forgotBtn}
             onPress={onNavigateToForgot}
+            disabled={loading}
           >
-            <Text style={styles.forgotText}>Forgot Password?</Text>
+            <Text style={styles.forgotText}>
+              Forgot Password?
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -159,9 +194,14 @@ export default function SignInScreen({
         </TouchableOpacity>
 
         <View style={styles.footerContainer}>
-          <Text style={styles.footerText}>Don't have an account? </Text>
+          <Text style={styles.footerText}>
+            Don't have an account?{' '}
+          </Text>
 
-          <TouchableOpacity onPress={onNavigateToRegister}>
+          <TouchableOpacity
+            onPress={onNavigateToRegister}
+            disabled={loading}
+          >
             <Text style={styles.createAccountText}>
               Create Account
             </Text>
