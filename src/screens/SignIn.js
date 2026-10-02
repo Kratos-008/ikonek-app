@@ -37,7 +37,7 @@ export default function SignInScreen({
       setLoading(true);
 
       const response = await fetch(
-        'http://192.168.1.36:5000/api/auth/login',
+        'http://192.168.1.51:5000/api/auth/login',
         {
           method: 'POST',
           headers: {

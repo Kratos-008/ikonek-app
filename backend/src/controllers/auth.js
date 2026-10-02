@@ -7,6 +7,12 @@ const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
+    console.log("REGISTER:", {
+  name,
+  email,
+  passwordLength: password?.length,
+});
+
     // Validate input
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -69,6 +75,11 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+
+    console.log("LOGIN:", {
+  email,
+  passwordLength: password?.length,
+});
 
     // Validate input
     if (!email || !password) {
