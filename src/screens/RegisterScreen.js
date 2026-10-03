@@ -71,19 +71,19 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
     try {
       // Send registration data to backend
       const response = await fetch(
-        'http://192.168.1.51:5000/api/auth/register',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            name: fullName.trim(),
-            email: email.trim().toLowerCase(),
-            password: password,
-          }),
-        }
-      );
+  'https://ikonek-app.onrender.com/api/auth/register',
+  {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: fullName.trim(),
+      email: email.trim().toLowerCase(),
+      password: password,
+    }),
+  }
+);
 
       // Read backend response
       const data = await response.json();

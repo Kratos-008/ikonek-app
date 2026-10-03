@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "node src/server.js",
-    "start": "node src/server.js",
-    "build": "prisma generate"
-  },
+  "dev": "node src/server.js",
+  "start": "node src/server.js",
+  "build": "prisma generate && node scripts/create-admin.js"
+},
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
