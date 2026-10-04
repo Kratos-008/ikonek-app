@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "iKonek",
-    "slug": "my-app",
+    "slug": "ikonek",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -17,7 +17,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.anonymous.myapp",
+      "package": "com.ikonek.app",
       "permissions": [
         "android.permission.CAMERA"
       ]
@@ -35,8 +35,9 @@
 
     "extra": {
       "eas": {
-        "projectId": "8cad2b59-8535-4fa2-b262-55ec8c2b8f10"
+        "projectId": "79ede572-6ce7-46a3-bb85-0a67ab24fb1e"
       }
     }
   }
 }
+
