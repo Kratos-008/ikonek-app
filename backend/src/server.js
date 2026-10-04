@@ -5,6 +5,7 @@ const cors = require("cors");
 
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/users");
+const youthRoutes = require("./routes/youth");
 const eventRoutes = require("./routes/events");
 const attendanceRoutes = require("./routes/attendance");
 const prayerRoutes = require("./routes/prayer");
@@ -26,6 +27,7 @@ app.get("/api/health", (req, res) => {
 // API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/youth", youthRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/prayer", prayerRoutes);

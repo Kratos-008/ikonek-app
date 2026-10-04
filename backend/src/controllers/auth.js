@@ -7,12 +7,6 @@ const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    console.log("REGISTER:", {
-  name,
-  email,
-  passwordLength: password?.length,
-});
-
     // Validate input
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -42,11 +36,13 @@ const register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create user
+    // Public registration can ONLY create YOUTH accounts
     const user = await prisma.user.create({
       data: {
         name: name.trim(),
         email: normalizedEmail,
         password: hashedPassword,
+        role: "YOUTH",
       },
     });
 
@@ -76,11 +72,6 @@ const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    console.log("LOGIN:", {
-  email,
-  passwordLength: password?.length,
-});
-
     // Validate input
     if (!email || !password) {
       return res.status(400).json({
@@ -89,6 +80,7 @@ const login = async (req, res) => {
       });
     }
 
+    // Normalize email
     const normalizedEmail = email.trim().toLowerCase();
 
     // Find user

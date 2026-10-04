@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,9 +8,10 @@ import {
   Modal,
   TextInput,
   Alert,
-  SafeAreaView,
   Share
 } from 'react-native';
+
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function EventsScreen() {
   const [events, setEvents] = useState([

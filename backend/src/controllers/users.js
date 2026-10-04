@@ -73,6 +73,168 @@ const getUserById = async (req, res) => {
   }
 };
 
+// Create user
+const createUser = async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      password,
+      role,
+      age,
+      sex,
+      address,
+      cellLeader,
+      category,
+    } = req.body;
+
+    // Validate name
+    if (!name || typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Name is required",
+      });
+    }
+
+    // Validate email
+    if (!email || typeof email !== "string" || !email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Check duplicate email
+    const existingUser = await prisma.user.findUnique({
+      where: {
+        email: normalizedEmail,
+      },
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "Email is already being used",
+      });
+    }
+
+    // Validate password
+    if (
+      !password ||
+      typeof password !== "string" ||
+      password.length < 6
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters",
+      });
+    }
+
+    // Validate role
+    const userRole = role || "YOUTH";
+
+    if (!["YOUTH", "ADMIN"].includes(userRole)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user role",
+      });
+    }
+
+    // Validate age
+    let numericAge = null;
+
+    if (age !== undefined && age !== null && age !== "") {
+      numericAge = Number(age);
+
+      if (
+        !Number.isInteger(numericAge) ||
+        numericAge < 1 ||
+        numericAge > 120
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Age must be a valid number between 1 and 120",
+        });
+      }
+    }
+
+    // Validate sex
+    let userSex = null;
+
+    if (sex !== undefined && sex !== null && sex !== "") {
+      if (!["Male", "Female"].includes(sex)) {
+        return res.status(400).json({
+          success: false,
+          message: "Sex must be Male or Female",
+        });
+      }
+
+      userSex = sex;
+    }
+
+    // Validate category
+    let userCategory = null;
+
+    if (category !== undefined && category !== null && category !== "") {
+      if (!["Newbie", "Regular"].includes(category)) {
+        return res.status(400).json({
+          success: false,
+          message: "Category must be Newbie or Regular",
+        });
+      }
+
+      userCategory = category;
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create user
+    const user = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: normalizedEmail,
+        password: hashedPassword,
+        role: userRole,
+        age: numericAge,
+        sex: userSex,
+
+        address:
+          address === undefined ||
+          address === null ||
+          address === ""
+            ? null
+            : String(address).trim(),
+
+        cellLeader:
+          cellLeader === undefined ||
+          cellLeader === null ||
+          cellLeader === ""
+            ? null
+            : String(cellLeader).trim(),
+
+        category: userCategory,
+      },
+      select: userSelect,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "User created successfully",
+      user,
+    });
+  } catch (error) {
+    console.error("Create user error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create user",
+    });
+  }
+};
+
 // Update user
 const updateUser = async (req, res) => {
   try {
@@ -157,7 +319,10 @@ const updateUser = async (req, res) => {
 
     // Password
     if (password !== undefined) {
-      if (typeof password !== "string" || password.length < 6) {
+      if (
+        typeof password !== "string" ||
+        password.length < 6
+      ) {
         return res.status(400).json({
           success: false,
           message: "Password must be at least 6 characters",
@@ -186,7 +351,11 @@ const updateUser = async (req, res) => {
       } else {
         const numericAge = Number(age);
 
-        if (!Number.isInteger(numericAge) || numericAge < 1 || numericAge > 120) {
+        if (
+          !Number.isInteger(numericAge) ||
+          numericAge < 1 ||
+          numericAge > 120
+        ) {
           return res.status(400).json({
             success: false,
             message: "Age must be a valid number between 1 and 120",
@@ -307,6 +476,7 @@ const deleteUser = async (req, res) => {
 module.exports = {
   getUsers,
   getUserById,
+  createUser,
   updateUser,
   deleteUser,
 };
