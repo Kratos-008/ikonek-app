@@ -65,6 +65,8 @@ export default function SignInScreen({
       } catch (jsonError) {
         throw new Error('The server returned an invalid response.');
       }
+      console.log('LOGIN STATUS:', response.status);
+console.log('LOGIN RESPONSE:', data);
 
       if (!response.ok) {
         Alert.alert(
