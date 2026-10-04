@@ -1,5 +1,4 @@
 const express = require("express");
-
 const router = express.Router();
 
 const {
@@ -14,7 +13,7 @@ const { authenticateToken } = require("../middleware/auth");
 // Submit a prayer request
 router.post("/", authenticateToken, createPrayerRequest);
 
-// Get logged-in user's prayer requests
+// Get prayer requests
 router.get("/", authenticateToken, getPrayerRequests);
 
 // Update a prayer request
