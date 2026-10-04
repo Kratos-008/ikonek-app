@@ -148,7 +148,9 @@ export function AdminDashboard({
   );
 
   const filteredYouth = youthList.filter((item) => {
-    if (directoryFilter === 'All') return true;
+    if (directoryFilter === 'All') {
+      return true;
+    }
 
     return item.category === directoryFilter;
   });
@@ -359,7 +361,7 @@ export function AdminDashboard({
 
     Alert.alert(
       'Delete Prayer Request',
-      `Delete the prayer request from ${requesterName}?`,
+      `Are you sure you want to permanently delete the prayer request from ${requesterName}?`,
       [
         {
           text: 'Cancel',
@@ -415,7 +417,7 @@ export function AdminDashboard({
 
               Alert.alert(
                 'Deleted',
-                'Prayer request has been deleted.'
+                'Prayer request has been deleted successfully.'
               );
             } catch (error) {
               console.error(
@@ -442,7 +444,9 @@ export function AdminDashboard({
   // ==========================================
 
   const formatDate = (dateString) => {
-    if (!dateString) return 'Unknown date';
+    if (!dateString) {
+      return 'Unknown date';
+    }
 
     const date = new Date(dateString);
 
@@ -510,7 +514,10 @@ export function AdminDashboard({
           key={request.id}
           style={styles.prayerCard}
         >
-          {/* Requester */}
+          {/* =====================================
+              REQUESTER
+          ====================================== */}
+
           <View style={styles.prayerRequesterHeader}>
             <View style={styles.requesterInfo}>
               <Text style={styles.requesterName}>
@@ -525,7 +532,6 @@ export function AdminDashboard({
               </Text>
             </View>
 
-            {/* Status */}
             <View
               style={[
                 styles.statusBadge,
@@ -534,7 +540,14 @@ export function AdminDashboard({
                   : styles.pendingBadge,
               ]}
             >
-              <Text style={styles.statusText}>
+              <Text
+                style={[
+                  styles.statusText,
+                  isAnswered
+                    ? styles.answeredStatusText
+                    : styles.pendingStatusText,
+                ]}
+              >
                 {isAnswered
                   ? '✓ Answered'
                   : '⏳ Pending'}
@@ -542,21 +555,32 @@ export function AdminDashboard({
             </View>
           </View>
 
-          {/* Date */}
+          {/* =====================================
+              DATE
+          ====================================== */}
+
           <Text style={styles.prayerDate}>
             Submitted:{' '}
             {formatDate(request.createdAt)}
           </Text>
 
-          {/* Prayer Content */}
+          {/* =====================================
+              PRAYER CONTENT
+          ====================================== */}
+
           <View style={styles.prayerContentBox}>
             <Text style={styles.prayerContent}>
               {request.content}
             </Text>
           </View>
 
-          {/* Admin Actions */}
+          {/* =====================================
+              ADMIN ACTIONS
+          ====================================== */}
+
           <View style={styles.prayerActions}>
+            {/* STATUS BUTTON */}
+
             {isAnswered ? (
               <TouchableOpacity
                 style={[
@@ -565,6 +589,7 @@ export function AdminDashboard({
                     styles.disabledButton,
                 ]}
                 disabled={isUpdating}
+                activeOpacity={0.8}
                 onPress={() =>
                   confirmStatusChange(
                     request,
@@ -573,9 +598,13 @@ export function AdminDashboard({
                 }
               >
                 {isUpdating ? (
-                  <ActivityIndicator color="#FFF" />
+                  <ActivityIndicator
+                    color="#FFFFFF"
+                  />
                 ) : (
-                  <Text style={styles.actionButtonText}>
+                  <Text
+                    style={styles.actionButtonText}
+                  >
                     ↩ Mark Pending
                   </Text>
                 )}
@@ -588,6 +617,7 @@ export function AdminDashboard({
                     styles.disabledButton,
                 ]}
                 disabled={isUpdating}
+                activeOpacity={0.8}
                 onPress={() =>
                   confirmStatusChange(
                     request,
@@ -596,14 +626,20 @@ export function AdminDashboard({
                 }
               >
                 {isUpdating ? (
-                  <ActivityIndicator color="#FFF" />
+                  <ActivityIndicator
+                    color="#FFFFFF"
+                  />
                 ) : (
-                  <Text style={styles.actionButtonText}>
+                  <Text
+                    style={styles.actionButtonText}
+                  >
                     ✓ Mark as Answered
                   </Text>
                 )}
               </TouchableOpacity>
             )}
+
+            {/* DELETE BUTTON */}
 
             <TouchableOpacity
               style={[
@@ -612,12 +648,15 @@ export function AdminDashboard({
                   styles.disabledButton,
               ]}
               disabled={isUpdating}
+              activeOpacity={0.8}
               onPress={() =>
                 deletePrayerRequest(request)
               }
             >
-              <Text style={styles.actionButtonText}>
-                🗑 Delete
+              <Text
+                style={styles.deleteButtonText}
+              >
+                🗑 Delete Prayer Request
               </Text>
             </TouchableOpacity>
           </View>
@@ -625,6 +664,10 @@ export function AdminDashboard({
       );
     });
   };
+
+  // ==========================================
+  // MAIN SCREEN
+  // ==========================================
 
   return (
     <Screen>
@@ -635,6 +678,7 @@ export function AdminDashboard({
       <TouchableOpacity
         style={styles.backBtn}
         onPress={onLogout}
+        activeOpacity={0.7}
       >
         <Text style={styles.backBtnText}>
           ⬅️ Back to Sign In
@@ -654,7 +698,8 @@ export function AdminDashboard({
       ====================================== */}
 
       <View style={styles.tabContainer}>
-        {/* Management */}
+        {/* MANAGEMENT */}
+
         <TouchableOpacity
           style={[
             styles.tabBtn,
@@ -664,6 +709,7 @@ export function AdminDashboard({
           onPress={() =>
             setTab('management')
           }
+          activeOpacity={0.8}
         >
           <Text
             style={
@@ -676,7 +722,8 @@ export function AdminDashboard({
           </Text>
         </TouchableOpacity>
 
-        {/* Youth Directory */}
+        {/* YOUTH DIRECTORY */}
+
         <TouchableOpacity
           style={[
             styles.tabBtn,
@@ -686,6 +733,7 @@ export function AdminDashboard({
           onPress={() =>
             setTab('directory')
           }
+          activeOpacity={0.8}
         >
           <Text
             style={
@@ -698,7 +746,8 @@ export function AdminDashboard({
           </Text>
         </TouchableOpacity>
 
-        {/* Prayer Requests */}
+        {/* PRAYER */}
+
         <TouchableOpacity
           style={[
             styles.tabBtn,
@@ -708,6 +757,7 @@ export function AdminDashboard({
           onPress={() =>
             setTab('prayer')
           }
+          activeOpacity={0.8}
         >
           <Text
             style={
@@ -738,6 +788,7 @@ export function AdminDashboard({
             onPress={() =>
               openAddModal('youth')
             }
+            activeOpacity={0.8}
           >
             <Text style={styles.actionBtnText}>
               ➕ Add Youth Data
@@ -749,6 +800,7 @@ export function AdminDashboard({
             onPress={() =>
               openAddModal('leader')
             }
+            activeOpacity={0.8}
           >
             <Text style={styles.actionBtnText}>
               ➕ Add Youth Leaders
@@ -764,6 +816,7 @@ export function AdminDashboard({
               onPress={() =>
                 openAddModal('admin')
               }
+              activeOpacity={0.8}
             >
               <Text
                 style={styles.outlineBtnText}
@@ -776,21 +829,19 @@ export function AdminDashboard({
           <TouchableOpacity
             style={[
               styles.actionBtn,
-              {
-                backgroundColor: '#10B981',
-                marginTop: 10,
-              },
+              styles.youthViewButton,
             ]}
             onPress={() =>
               onNavigate('youthDashboard')
             }
+            activeOpacity={0.8}
           >
             <Text style={styles.actionBtnText}>
               👁️ Switch to Youth View
             </Text>
           </TouchableOpacity>
 
-          <View style={{ marginTop: 15 }}>
+          <View style={styles.logoutContainer}>
             <Button
               title="Logout"
               onPress={onLogout}
@@ -810,7 +861,8 @@ export function AdminDashboard({
             📋 Youth Directory ({youthList.length})
           </Text>
 
-          {/* Filters */}
+          {/* FILTERS */}
+
           <View style={styles.filterRow}>
             {[
               'All',
@@ -827,6 +879,7 @@ export function AdminDashboard({
                 onPress={() =>
                   setDirectoryFilter(filter)
                 }
+                activeOpacity={0.8}
               >
                 <Text
                   style={
@@ -899,7 +952,7 @@ export function AdminDashboard({
             ))
           )}
 
-          <View style={{ marginTop: 15 }}>
+          <View style={styles.logoutContainer}>
             <Button
               title="Logout"
               onPress={onLogout}
@@ -918,7 +971,7 @@ export function AdminDashboard({
           }
         >
           <View style={styles.prayerHeaderRow}>
-            <View>
+            <View style={styles.prayerHeaderInfo}>
               <Text
                 style={styles.sectionTitle}
               >
@@ -940,6 +993,7 @@ export function AdminDashboard({
               style={styles.refreshButton}
               onPress={loadPrayerRequests}
               disabled={prayerLoading}
+              activeOpacity={0.8}
             >
               {prayerLoading ? (
                 <ActivityIndicator
@@ -958,7 +1012,7 @@ export function AdminDashboard({
 
           {renderPrayerRequests()}
 
-          <View style={{ marginTop: 15 }}>
+          <View style={styles.logoutContainer}>
             <Button
               title="Logout"
               onPress={onLogout}
@@ -976,6 +1030,9 @@ export function AdminDashboard({
         visible={modalVisible}
         transparent
         animationType="slide"
+        onRequestClose={() =>
+          setModalVisible(false)
+        }
       >
         <View style={styles.modalOverlay}>
           <ScrollView
@@ -1005,6 +1062,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="e.g. Juan Dela Cruz"
+                    placeholderTextColor="#94A3B8"
                     value={fullName}
                     onChangeText={
                       setFullName
@@ -1012,13 +1070,10 @@ export function AdminDashboard({
                   />
 
                   <View
-                    style={{
-                      flexDirection: 'row',
-                      gap: 10,
-                    }}
+                    style={styles.formRow}
                   >
                     <View
-                      style={{ flex: 1 }}
+                      style={styles.formColumn}
                     >
                       <Text
                         style={
@@ -1031,6 +1086,7 @@ export function AdminDashboard({
                       <TextInput
                         style={styles.input}
                         placeholder="e.g. 18"
+                        placeholderTextColor="#94A3B8"
                         keyboardType="numeric"
                         value={age}
                         onChangeText={
@@ -1040,7 +1096,7 @@ export function AdminDashboard({
                     </View>
 
                     <View
-                      style={{ flex: 1 }}
+                      style={styles.formColumn}
                     >
                       <Text
                         style={
@@ -1051,11 +1107,9 @@ export function AdminDashboard({
                       </Text>
 
                       <View
-                        style={{
-                          flexDirection:
-                            'row',
-                          gap: 5,
-                        }}
+                        style={
+                          styles.sexRow
+                        }
                       >
                         <TouchableOpacity
                           style={[
@@ -1117,6 +1171,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="Enter complete address"
+                    placeholderTextColor="#94A3B8"
                     value={address}
                     onChangeText={
                       setAddress
@@ -1132,6 +1187,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="Name of Cell Leader"
+                    placeholderTextColor="#94A3B8"
                     value={cellLeader}
                     onChangeText={
                       setCellLeader
@@ -1145,11 +1201,9 @@ export function AdminDashboard({
                   </Text>
 
                   <View
-                    style={{
-                      flexDirection:
-                        'row',
-                      gap: 10,
-                    }}
+                    style={
+                      styles.categoryRow
+                    }
                   >
                     <TouchableOpacity
                       style={[
@@ -1213,6 +1267,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="Full Name"
+                    placeholderTextColor="#94A3B8"
                     value={genericName}
                     onChangeText={
                       setGenericName
@@ -1228,6 +1283,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="Password (Default: 123456)"
+                    placeholderTextColor="#94A3B8"
                     secureTextEntry
                     value={genericPassword}
                     onChangeText={
@@ -1243,6 +1299,7 @@ export function AdminDashboard({
                 <TouchableOpacity
                   style={styles.saveBtn}
                   onPress={handleSave}
+                  activeOpacity={0.8}
                 >
                   <Text
                     style={styles.btnText}
@@ -1256,6 +1313,7 @@ export function AdminDashboard({
                   onPress={() =>
                     setModalVisible(false)
                   }
+                  activeOpacity={0.8}
                 >
                   <Text
                     style={styles.btnText}
@@ -1322,7 +1380,9 @@ const styles = StyleSheet.create({
   tabBtn: {
     flex: 1,
     paddingVertical: 10,
+    paddingHorizontal: 3,
     alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 8,
   },
 
@@ -1333,13 +1393,15 @@ const styles = StyleSheet.create({
   tabText: {
     color: '#64748B',
     fontWeight: '600',
-    fontSize: 12,
+    fontSize: 11,
+    textAlign: 'center',
   },
 
   tabTextActive: {
     color: '#FFF',
     fontWeight: '600',
-    fontSize: 12,
+    fontSize: 11,
+    textAlign: 'center',
   },
 
   content: {
@@ -1382,6 +1444,15 @@ const styles = StyleSheet.create({
     color: '#2563EB',
     fontWeight: 'bold',
     fontSize: 15,
+  },
+
+  youthViewButton: {
+    backgroundColor: '#10B981',
+    marginTop: 10,
+  },
+
+  logoutContainer: {
+    marginTop: 15,
   },
 
   emptyText: {
@@ -1444,6 +1515,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     color: '#1E293B',
+    flex: 1,
   },
 
   userDetail: {
@@ -1486,6 +1558,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
+  prayerHeaderInfo: {
+    flex: 1,
+    paddingRight: 10,
+  },
+
   prayerCount: {
     color: '#64748B',
     fontSize: 12,
@@ -1501,6 +1578,7 @@ const styles = StyleSheet.create({
     borderColor: '#BFDBFE',
     minWidth: 80,
     alignItems: 'center',
+    justifyContent: 'center',
   },
 
   refreshText: {
@@ -1610,6 +1688,13 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 11,
     fontWeight: 'bold',
+  },
+
+  pendingStatusText: {
+    color: '#92400E',
+  },
+
+  answeredStatusText: {
     color: '#166534',
   },
 
@@ -1628,45 +1713,57 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
 
+  // ==========================================
+  // PRAYER ACTIONS
+  // ==========================================
+
   prayerActions: {
-    flexDirection: 'row',
-    gap: 8,
     marginTop: 12,
+    gap: 8,
   },
 
   answeredButton: {
-    flex: 1,
+    width: '100%',
     backgroundColor: '#16A34A',
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 42,
+    minHeight: 44,
   },
 
   pendingButton: {
-    flex: 1,
+    width: '100%',
     backgroundColor: '#D97706',
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 42,
+    minHeight: 44,
   },
 
   deleteButton: {
+    width: '100%',
     backgroundColor: '#DC2626',
+    paddingVertical: 12,
     paddingHorizontal: 14,
-    paddingVertical: 10,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 42,
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: '#B91C1C',
   },
 
   actionButtonText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+
+  deleteButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: 'bold',
   },
 
@@ -1719,6 +1816,21 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     fontSize: 14,
     backgroundColor: '#F8FAFC',
+    color: '#1E293B',
+  },
+
+  formRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+
+  formColumn: {
+    flex: 1,
+  },
+
+  sexRow: {
+    flexDirection: 'row',
+    gap: 5,
   },
 
   sexBtn: {
@@ -1743,6 +1855,11 @@ const styles = StyleSheet.create({
   sexTextActive: {
     color: '#FFF',
     fontWeight: '600',
+  },
+
+  categoryRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
 
   catBtn: {
