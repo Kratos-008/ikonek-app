@@ -34,12 +34,27 @@ const createPrayerRequest = async (req, res) => {
   }
 };
 
-// Get the logged-in user's prayer requests
+// Get prayer requests
+// YOUTH → only their own requests
+// ADMIN → all requests
 const getPrayerRequests = async (req, res) => {
   try {
+    const isAdmin = req.user.role === "ADMIN";
+
     const prayerRequests = await prisma.prayerRequest.findMany({
-      where: {
-        userId: req.user.userId,
+      where: isAdmin
+        ? {}
+        : {
+            userId: req.user.userId,
+          },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
       },
       orderBy: {
         createdAt: "desc",
@@ -61,16 +76,22 @@ const getPrayerRequests = async (req, res) => {
 };
 
 // Update a prayer request
+// YOUTH → can update their own request
+// ADMIN → can update any request
 const updatePrayerRequest = async (req, res) => {
   try {
     const { id } = req.params;
     const { content, status } = req.body;
 
+    const isAdmin = req.user.role === "ADMIN";
+
     const existingRequest = await prisma.prayerRequest.findFirst({
-      where: {
-        id,
-        userId: req.user.userId,
-      },
+      where: isAdmin
+        ? { id }
+        : {
+            id,
+            userId: req.user.userId,
+          },
     });
 
     if (!existingRequest) {
@@ -110,15 +131,21 @@ const updatePrayerRequest = async (req, res) => {
 };
 
 // Delete a prayer request
+// YOUTH → can delete their own request
+// ADMIN → can delete any request
 const deletePrayerRequest = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const isAdmin = req.user.role === "ADMIN";
+
     const existingRequest = await prisma.prayerRequest.findFirst({
-      where: {
-        id,
-        userId: req.user.userId,
-      },
+      where: isAdmin
+        ? { id }
+        : {
+            id,
+            userId: req.user.userId,
+          },
     });
 
     if (!existingRequest) {
