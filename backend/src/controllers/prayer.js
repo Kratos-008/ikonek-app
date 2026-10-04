@@ -3,7 +3,7 @@ const prisma = require("../lib/prisma");
 // Submit a prayer request
 const createPrayerRequest = async (req, res) => {
   try {
-    const { userId, content } = req.body;
+    const { content } = req.body;
 
     if (!content || !content.trim()) {
       return res.status(400).json({
@@ -14,7 +14,7 @@ const createPrayerRequest = async (req, res) => {
 
     const prayerRequest = await prisma.prayerRequest.create({
       data: {
-        userId: userId || null,
+        userId: req.user.userId,
         content: content.trim(),
       },
     });
@@ -34,18 +34,12 @@ const createPrayerRequest = async (req, res) => {
   }
 };
 
-// Get prayer requests
+// Get the logged-in user's prayer requests
 const getPrayerRequests = async (req, res) => {
   try {
     const prayerRequests = await prisma.prayerRequest.findMany({
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
+      where: {
+        userId: req.user.userId,
       },
       orderBy: {
         createdAt: "desc",
@@ -72,8 +66,11 @@ const updatePrayerRequest = async (req, res) => {
     const { id } = req.params;
     const { content, status } = req.body;
 
-    const existingRequest = await prisma.prayerRequest.findUnique({
-      where: { id },
+    const existingRequest = await prisma.prayerRequest.findFirst({
+      where: {
+        id,
+        userId: req.user.userId,
+      },
     });
 
     if (!existingRequest) {
@@ -84,7 +81,9 @@ const updatePrayerRequest = async (req, res) => {
     }
 
     const prayerRequest = await prisma.prayerRequest.update({
-      where: { id },
+      where: {
+        id,
+      },
       data: {
         ...(content !== undefined && {
           content: content.trim(),
@@ -115,8 +114,11 @@ const deletePrayerRequest = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const existingRequest = await prisma.prayerRequest.findUnique({
-      where: { id },
+    const existingRequest = await prisma.prayerRequest.findFirst({
+      where: {
+        id,
+        userId: req.user.userId,
+      },
     });
 
     if (!existingRequest) {
@@ -127,7 +129,9 @@ const deletePrayerRequest = async (req, res) => {
     }
 
     await prisma.prayerRequest.delete({
-      where: { id },
+      where: {
+        id,
+      },
     });
 
     res.json({

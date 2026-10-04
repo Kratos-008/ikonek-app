@@ -1,4 +1,5 @@
 const express = require("express");
+
 const router = express.Router();
 
 const {
@@ -8,16 +9,18 @@ const {
   deletePrayerRequest,
 } = require("../controllers/prayer");
 
-// Submit a prayer request
-router.post("/", createPrayerRequest);
+const { authenticateToken } = require("../middleware/auth");
 
-// Get prayer requests
-router.get("/", getPrayerRequests);
+// Submit a prayer request
+router.post("/", authenticateToken, createPrayerRequest);
+
+// Get logged-in user's prayer requests
+router.get("/", authenticateToken, getPrayerRequests);
 
 // Update a prayer request
-router.put("/:id", updatePrayerRequest);
+router.put("/:id", authenticateToken, updatePrayerRequest);
 
 // Delete a prayer request
-router.delete("/:id", deletePrayerRequest);
+router.delete("/:id", authenticateToken, deletePrayerRequest);
 
 module.exports = router;
