@@ -1,21 +1,78 @@
 const prisma = require("../lib/prisma");
 
-// Record attendance
+const toDateKey = (value) => {
+  if (!value) {
+    const now = new Date();
+    return now.toISOString().slice(0, 10);
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+};
+
+const dateFromKey = (dateKey) => new Date(`${dateKey}T00:00:00.000Z`);
+
+// Create/update today's attendance record for a youth.
 const checkIn = async (req, res) => {
   try {
-    const { userId, eventId } = req.body;
+    const { youthId, eventId, date, status = "PRESENT" } = req.body;
+    const dateKey = toDateKey(date);
 
-    if (!userId || !eventId) {
+    if (!youthId || !dateKey) {
       return res.status(400).json({
         success: false,
-        message: "userId and eventId are required",
+        message: "youthId and a valid date are required",
       });
     }
 
-    const attendance = await prisma.attendance.create({
-      data: {
-        userId,
-        eventId,
+    const youth = await prisma.youthProfile.findUnique({
+      where: { id: youthId },
+    });
+
+    if (!youth) {
+      return res.status(404).json({
+        success: false,
+        message: "Youth profile not found",
+      });
+    }
+
+    if (eventId) {
+      const event = await prisma.event.findUnique({ where: { id: eventId } });
+      if (!event) {
+        return res.status(404).json({
+          success: false,
+          message: "Event not found",
+        });
+      }
+    }
+
+    const attendance = await prisma.attendance.upsert({
+      where: {
+        youthId_dateKey: {
+          youthId,
+          dateKey,
+        },
+      },
+      create: {
+        youthId,
+        userId: req.user?.id || null,
+        eventId: eventId || null,
+        attendanceDate: dateFromKey(dateKey),
+        dateKey,
+        status: String(status).toUpperCase(),
+      },
+      update: {
+        userId: req.user?.id || null,
+        ...(eventId !== undefined ? { eventId: eventId || null } : {}),
+        attendanceDate: dateFromKey(dateKey),
+        status: String(status).toUpperCase(),
+      },
+      include: {
+        youth: true,
+        event: true,
       },
     });
 
@@ -26,7 +83,6 @@ const checkIn = async (req, res) => {
     });
   } catch (error) {
     console.error("Check-in error:", error);
-
     res.status(500).json({
       success: false,
       message: "Failed to record attendance",
@@ -34,17 +90,32 @@ const checkIn = async (req, res) => {
   }
 };
 
-// Get attendance records
+// Get attendance records. With no date filter, this returns the full history.
 const getAttendance = async (req, res) => {
   try {
+    const { date, youthId } = req.query;
+    const dateKey = date ? toDateKey(date) : null;
+
+    if (date && !dateKey) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date",
+      });
+    }
+
     const attendance = await prisma.attendance.findMany({
+      where: {
+        ...(dateKey ? { dateKey } : {}),
+        ...(youthId ? { youthId } : {}),
+      },
       include: {
-        user: true,
+        youth: true,
         event: true,
       },
-      orderBy: {
-        createdAt: "desc",
-      },
+      orderBy: [
+        { attendanceDate: "desc" },
+        { createdAt: "desc" },
+      ],
     });
 
     res.json({
@@ -53,7 +124,6 @@ const getAttendance = async (req, res) => {
     });
   } catch (error) {
     console.error("Get attendance error:", error);
-
     res.status(500).json({
       success: false,
       message: "Failed to get attendance records",
@@ -61,7 +131,55 @@ const getAttendance = async (req, res) => {
   }
 };
 
+// Remove one attendance record, normally used to undo a Present mark.
+const deleteAttendance = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await prisma.attendance.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: "Attendance record not found",
+      });
+    }
+
+    await prisma.attendance.delete({ where: { id } });
+
+    res.json({
+      success: true,
+      message: "Attendance record removed",
+    });
+  } catch (error) {
+    console.error("Delete attendance error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove attendance record",
+    });
+  }
+};
+
+// Clear the entire attendance history. Kept admin-only by the route.
+const clearAttendance = async (req, res) => {
+  try {
+    const result = await prisma.attendance.deleteMany({});
+    res.json({
+      success: true,
+      message: "Attendance history cleared",
+      deletedCount: result.count,
+    });
+  } catch (error) {
+    console.error("Clear attendance error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to clear attendance history",
+    });
+  }
+};
+
 module.exports = {
   checkIn,
   getAttendance,
+  deleteAttendance,
+  clearAttendance,
 };

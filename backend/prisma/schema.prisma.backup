@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  YOUTH
+  ADMIN
+}
+
+model User {
+  id       String   @id @default(cuid())
+  name     String
+  email    String   @unique
+  password String
+  role     UserRole @default(YOUTH)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Optional connection to a youth profile
+  youthProfile YouthProfile?
+
+  prayerRequests PrayerRequest[]
+  attendanceRecords Attendance[] @relation("AttendanceUser")
+}
+
+model YouthProfile {
+  id String @id @default(cuid())
+
+  // Optional login account connection
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Youth information
+  name       String
+  gender     String?
+  age        Int?
+  birthday   String?
+  address    String?
+  cellLeader String?
+  category   String?
+
+  // Profile photo URI for now
+  image String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attendanceRecords Attendance[]
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  date        DateTime
+  location    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attendanceRecords Attendance[]
+}
+
+model Attendance {
+  id             String       @id @default(cuid())
+  youthId        String
+  userId         String?
+  eventId        String?
+  attendanceDate DateTime
+  dateKey        String
+  status         String       @default("PRESENT")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  youth YouthProfile @relation(fields: [youthId], references: [id], onDelete: Cascade)
+  user  User?        @relation("AttendanceUser", fields: [userId], references: [id], onDelete: SetNull)
+  event Event?       @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  @@unique([youthId, dateKey])
+  @@index([dateKey])
+  @@index([youthId])
+}
+
+model PrayerRequest {
+  id            String   @id @default(cuid())
+  userId        String?
+  senderName    String?
+  devotionTitle String?
+  biblePassage  String?
+  content       String
+  imageUrl      String?
+  status        String   @default("PENDING")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}

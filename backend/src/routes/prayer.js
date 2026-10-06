@@ -1,4 +1,5 @@
 const express = require("express");
+
 const router = express.Router();
 
 const {
@@ -9,17 +10,26 @@ const {
 } = require("../controllers/prayer");
 
 const { authenticateToken } = require("../middleware/auth");
+const prayerImageUpload = require("../middleware/prayerUpload");
 
-// Submit a prayer request
-router.post("/", authenticateToken, createPrayerRequest);
+console.log("prayerImageUpload:", prayerImageUpload);
 
-// Get prayer requests
+router.post(
+  "/",
+  authenticateToken,
+  prayerImageUpload.single("image"),
+  createPrayerRequest
+);
+
 router.get("/", authenticateToken, getPrayerRequests);
 
-// Update a prayer request
-router.put("/:id", authenticateToken, updatePrayerRequest);
+router.put(
+  "/:id",
+  authenticateToken,
+  prayerImageUpload.single("image"),
+  updatePrayerRequest
+);
 
-// Delete a prayer request
 router.delete("/:id", authenticateToken, deletePrayerRequest);
 
 module.exports = router;

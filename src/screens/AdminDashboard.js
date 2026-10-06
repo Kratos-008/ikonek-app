@@ -14,7 +14,7 @@ import { Screen } from '../components/Screen';
 import { Button } from '../components/Button';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'https://ikonek-app.onrender.com/api';
+const API_URL = 'http://192.168.1.48:5000/api';
 
 export function AdminDashboard({
   user,
@@ -469,6 +469,7 @@ export function AdminDashboard({
   // ==========================================
 
   const renderPrayerRequests = () => {
+    console.log('PRAYER TAB RENDERING:', prayerRequests);
     if (prayerLoading) {
       return (
         <View style={styles.loadingContainer}>

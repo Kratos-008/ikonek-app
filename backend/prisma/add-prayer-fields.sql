@@ -1,0 +1,11 @@
+ALTER TABLE "PrayerRequest"
+ADD COLUMN IF NOT EXISTS "senderName" TEXT;
+
+ALTER TABLE "PrayerRequest"
+ADD COLUMN IF NOT EXISTS "devotionTitle" TEXT;
+
+ALTER TABLE "PrayerRequest"
+ADD COLUMN IF NOT EXISTS "biblePassage" TEXT;
+
+ALTER TABLE "PrayerRequest"
+ADD COLUMN IF NOT EXISTS "imageUrl" TEXT;

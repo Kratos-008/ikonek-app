@@ -1,0 +1,2 @@
+-- This migration was already represented in 0_init.
+-- Kept locally because it is recorded as applied in the database.

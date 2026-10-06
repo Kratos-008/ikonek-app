@@ -58,7 +58,15 @@ const getEventById = async (req, res) => {
 // Create event
 const createEvent = async (req, res) => {
   try {
-    const { title, description, date, location } = req.body;
+    const {
+      title,
+      description,
+      date,
+      location,
+      category,
+      flowOfProgram,
+      attendees,
+    } = req.body;
 
     if (!title || !date) {
       return res.status(400).json({
@@ -67,12 +75,30 @@ const createEvent = async (req, res) => {
       });
     }
 
+    const parsedDate = new Date(date);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event date",
+      });
+    }
+
     const event = await prisma.event.create({
       data: {
         title: title.trim(),
         description: description?.trim() || null,
-        date: new Date(date),
+        date: parsedDate,
         location: location?.trim() || null,
+
+        category: category?.trim() || "Upcoming",
+
+        flowOfProgram:
+          flowOfProgram?.trim() || null,
+
+        attendees: Array.isArray(attendees)
+          ? attendees
+          : [],
       },
     });
 
@@ -95,7 +121,16 @@ const createEvent = async (req, res) => {
 const updateEvent = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, date, location } = req.body;
+
+    const {
+      title,
+      description,
+      date,
+      location,
+      category,
+      flowOfProgram,
+      attendees,
+    } = req.body;
 
     const existingEvent = await prisma.event.findUnique({
       where: {
@@ -110,24 +145,61 @@ const updateEvent = async (req, res) => {
       });
     }
 
+    const updateData = {};
+
+    if (title !== undefined) {
+      updateData.title = title.trim();
+    }
+
+    if (description !== undefined) {
+      updateData.description =
+        description?.trim() || null;
+    }
+
+    if (date !== undefined) {
+      const parsedDate = new Date(date);
+
+      if (Number.isNaN(parsedDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid event date",
+        });
+      }
+
+      updateData.date = parsedDate;
+    }
+
+    if (location !== undefined) {
+      updateData.location =
+        location?.trim() || null;
+    }
+
+    if (category !== undefined) {
+      updateData.category =
+        category?.trim() || "Upcoming";
+    }
+
+    if (flowOfProgram !== undefined) {
+      updateData.flowOfProgram =
+        flowOfProgram?.trim() || null;
+    }
+
+    if (attendees !== undefined) {
+      if (!Array.isArray(attendees)) {
+        return res.status(400).json({
+          success: false,
+          message: "Attendees must be an array",
+        });
+      }
+
+      updateData.attendees = attendees;
+    }
+
     const event = await prisma.event.update({
       where: {
         id,
       },
-      data: {
-        ...(title !== undefined && {
-          title: title.trim(),
-        }),
-        ...(description !== undefined && {
-          description: description?.trim() || null,
-        }),
-        ...(date !== undefined && {
-          date: new Date(date),
-        }),
-        ...(location !== undefined && {
-          location: location?.trim() || null,
-        }),
-      },
+      data: updateData,
     });
 
     res.json({
