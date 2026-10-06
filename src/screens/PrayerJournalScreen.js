@@ -66,7 +66,7 @@ export default function PrayerJournalScreen({ navigation }) {
         return;
       }
 
-      const response = await fetch(`${API_URL}/prayer`, {
+      const response = await fetch(`${API_URL}/api/prayer`, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -244,7 +244,7 @@ export default function PrayerJournalScreen({ navigation }) {
   formData.append('image', file);
 }
 
-      const response = await fetch(`${API_URL}/prayer`, {
+      const response = await fetch(`${API_URL}/api/prayer`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -315,7 +315,7 @@ export default function PrayerJournalScreen({ navigation }) {
           : 'ANSWERED';
 
       const response = await fetch(
-        `${API_URL}/prayer/${requestId}`,
+        `${API_URL}/api/prayer/${requestId}`,
         {
           method: 'PUT',
           headers: {
@@ -395,7 +395,7 @@ export default function PrayerJournalScreen({ navigation }) {
               }
 
               const response = await fetch(
-                `${API_URL}/prayer/${requestId}`,
+                `${API_URL}/api/prayer/${requestId}`,
                 {
                   method: 'DELETE',
                   headers: {

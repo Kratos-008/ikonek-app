@@ -174,7 +174,7 @@ export function AdminDashboard({
       }
 
       const response = await fetch(
-        `${API_URL}/prayer`,
+        `${API_URL}/api/prayer`,
         {
           method: 'GET',
           headers: {
@@ -243,7 +243,7 @@ export function AdminDashboard({
       }
 
       const response = await fetch(
-        `${API_URL}/prayer/${requestId}`,
+        `${API_URL}/api/prayer/${requestId}`,
         {
           method: 'PUT',
           headers: {
@@ -388,7 +388,7 @@ export function AdminDashboard({
               }
 
               const response = await fetch(
-                `${API_URL}/prayer/${request.id}`,
+                `${API_URL}/api/prayer/${request.id}`,
                 {
                   method: 'DELETE',
                   headers: {
