@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -43,6 +43,7 @@ export default function AttendanceScreen() {
   const [regularList, setRegularList] = useState([]);
   const [newbieList, setNewbieList] = useState([]);
   const [eventsList, setEventsList] = useState([]);
+  const [activeEvent, setActiveEvent] = useState(null);
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [historySearch, setHistorySearch] = useState('');
@@ -160,16 +161,36 @@ export default function AttendanceScreen() {
     return `${y}-${m}-${d}`;
   };
 
+  // Attendance is tied to the event scheduled for today's exact date.
+  const getEventDateKey = (dateValue) => {
+    if (!dateValue) return null;
+    const date = new Date(dateValue);
+    if (Number.isNaN(date.getTime())) return null;
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const getActiveEventFromList = (events = []) => {
+    const todayKey = getTodayDateKey();
+    return [...events]
+      .filter(event => getEventDateKey(event.date) === todayKey)
+      .sort((a, b) => new Date(a.date) - new Date(b.date))[0] || null;
+  };
+
   const getPresentRecordsForYouth = (records, youthId) =>
     records.filter(r => r.youthId === youthId && String(r.status).toUpperCase() === 'PRESENT');
 
-  const formatYouth = (item, records = []) => {
+  const formatYouth = (item, records = [], currentEvent = null) => {
     const category = item.category || 'Newbie';
     const youthRecords = getPresentRecordsForYouth(records, item.id);
     const count = youthRecords.length;
     const isRegular = category === 'Regular';
     const todayKey = getTodayDateKey();
-    const todayRecord = youthRecords.find(r => r.dateKey === todayKey);
+    const todayRecord = currentEvent
+      ? youthRecords.find(r => r.dateKey === todayKey && r.eventId === currentEvent.id)
+      : null;
 
     return {
       id: item.id,
@@ -224,25 +245,37 @@ export default function AttendanceScreen() {
     try {
       const token = await getAuthToken();
       if (!token) return;
-      const [youthResponse, attendanceRecordsFromDb] = await Promise.all([
+      const [youthResponse, attendanceRecordsFromDb, eventsResponse] = await Promise.all([
         fetch(`${API_URL}/api/youth`, {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         }),
         fetch(`${API_URL}/api/attendance`, {
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         }),
+        fetch(`${API_URL}/api/events`, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        }),
       ]);
 
       const youthData = await youthResponse.json();
       const attendanceData = await attendanceRecordsFromDb.json();
+      const eventsData = await eventsResponse.json();
       if (!youthResponse.ok) throw new Error(youthData.message || 'Failed to load youth.');
       if (!attendanceRecordsFromDb.ok) throw new Error(attendanceData.message || 'Failed to load attendance.');
+      if (!eventsResponse.ok) throw new Error(eventsData.message || 'Failed to load events.');
 
       const attendance = Array.isArray(attendanceData.attendance) ? attendanceData.attendance : [];
+      const events = Array.isArray(eventsData.events) ? eventsData.events : [];
+      const currentEvent = getActiveEventFromList(events);
+
+      setEventsList(events);
+      setActiveEvent(currentEvent);
       setAttendanceRecords(attendance);
       setAttendanceHistory(dedupeHistory(attendance.filter(r => String(r.status).toUpperCase() === 'PRESENT').map(formatHistoryRecord)));
 
-      const records = Array.isArray(youthData.youth) ? youthData.youth.map(item => formatYouth(item, attendance)) : [];
+      const records = Array.isArray(youthData.youth)
+        ? youthData.youth.map(item => formatYouth(item, attendance, currentEvent))
+        : [];
       setRegularList(records.filter(x => x.status === 'Regular'));
       setNewbieList(records.filter(x => x.status !== 'Regular'));
 
@@ -258,7 +291,7 @@ export default function AttendanceScreen() {
       setLeadersList(leaders);
     } catch (e) {
       console.error('Load Neon data error:', e);
-      Alert.alert('Database Error', e.message || 'Unable to load youth and attendance from the server.');
+      Alert.alert('Database Error', e.message || 'Unable to load youth, events and attendance from the server.');
     }
   };
 
@@ -269,11 +302,15 @@ export default function AttendanceScreen() {
   const recordAttendance = async (youthId) => {
     const token = await getAuthToken();
     if (!token) return false;
+    if (!activeEvent) {
+      Alert.alert('Attendance Closed', 'There is no event scheduled for today. Attendance will open automatically on the event date.');
+      return false;
+    }
 
     const response = await fetch(`${API_URL}/api/attendance/check-in`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ youthId, date: getTodayDateKey(), status: 'PRESENT' }),
+      body: JSON.stringify({ youthId, eventId: activeEvent.id, date: getTodayDateKey(), status: 'PRESENT' }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Failed to record attendance.');
@@ -283,7 +320,12 @@ export default function AttendanceScreen() {
   const removeTodayAttendance = async (youthId) => {
     const token = await getAuthToken();
     if (!token) return false;
-    const record = attendanceRecords.find(r => r.youthId === youthId && r.dateKey === getTodayDateKey());
+    if (!activeEvent) return true;
+    const record = attendanceRecords.find(r =>
+      r.youthId === youthId &&
+      r.dateKey === getTodayDateKey() &&
+      r.eventId === activeEvent.id
+    );
     if (!record) return true;
 
     const response = await fetch(`${API_URL}/api/attendance/${record.id}`, {
@@ -340,6 +382,10 @@ export default function AttendanceScreen() {
 
   // TIMERS: each Present creates one persistent attendance record for today.
   const handleTogglePresentNewbie = async (id) => {
+    if (!activeEvent) {
+      Alert.alert('Attendance Closed', 'Attendance is only available when an event is scheduled for today.');
+      return;
+    }
     const member = newbieList.find(item => item.id === id);
     if (!member || member.isPresent) return;
 
@@ -383,6 +429,10 @@ export default function AttendanceScreen() {
 
   // REGULAR: mark Present in Neon for today.
   const handleMarkPresentRegular = async (id) => {
+    if (!activeEvent) {
+      Alert.alert('Attendance Closed', 'Attendance is only available when an event is scheduled for today.');
+      return;
+    }
     const member = regularList.find(item => item.id === id);
     if (!member) return;
     if (member.isPresent) {
@@ -429,6 +479,12 @@ export default function AttendanceScreen() {
   // QR SCAN: Regular members LANG na may QR code ang awtomatikong mate-check.
   // Hindi apektado ang First / Second / Third Timer (walang madadagdag na bilang).
   const handleBarCodeScanned = async ({ data }) => {
+    if (!activeEvent) {
+      setScannerModalVisible(false);
+      scanLockRef.current = false;
+      Alert.alert('Attendance Closed', 'There is no event scheduled for today.');
+      return;
+    }
     if (scanLockRef.current) return; // iwas double-scan
     scanLockRef.current = true;
     setScannerTorchOn(false);
@@ -1056,7 +1112,8 @@ export default function AttendanceScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.iconActionBtn, { backgroundColor: theme.cardBg, borderColor: theme.border }]}
+            style={[styles.iconActionBtn, { backgroundColor: activeEvent ? '#10B981' : '#475569', borderColor: activeEvent ? '#059669' : '#334155', opacity: activeEvent ? 1 : 0.6 }]}
+            disabled={!activeEvent}
             onPress={() => {
               if (hasCameraPermission === false) {
                 Alert.alert("Permission Error", "Camera permission is not granted.");
@@ -1091,6 +1148,16 @@ export default function AttendanceScreen() {
           >
             <Text style={[styles.iconBtnText, { color: '#FFF' }]}>👥 Leaders</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* CURRENT EVENT / ATTENDANCE SESSION */}
+        <View style={[styles.eventAttendanceBanner, { backgroundColor: theme.cardBg, borderColor: activeEvent ? '#10B981' : theme.border }]}>
+          <Text style={[styles.eventAttendanceTitle, { color: activeEvent ? '#34D399' : theme.textSub }]}>
+            {activeEvent ? '🟢 Attendance OPEN' : '🔒 Attendance CLOSED'}
+          </Text>
+          <Text style={[styles.eventAttendanceText, { color: theme.textMain }]}>
+            {activeEvent ? `${activeEvent.title} • ${new Date(activeEvent.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Attendance opens automatically on the exact date of a scheduled event.'}
+          </Text>
         </View>
 
         {/* ADD NEW MEMBER BUTTON */}
@@ -1317,7 +1384,8 @@ export default function AttendanceScreen() {
                     </View>
                   ) : (
                     <TouchableOpacity
-                      style={styles.presentBtn}
+                      style={[styles.presentBtn, !activeEvent && { backgroundColor: '#64748B', opacity: 0.6 }]}
+                      disabled={!activeEvent}
                       onPress={() => {
                         if (!isRegular) {
                           handleTogglePresentNewbie(item.id);
@@ -1326,7 +1394,7 @@ export default function AttendanceScreen() {
                         }
                       }}
                     >
-                      <Text style={styles.btnText}>Mark Present</Text>
+                      <Text style={styles.btnText}>{activeEvent ? 'Mark Present' : 'Attendance Closed'}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1998,6 +2066,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 6,
   },
+  eventAttendanceBanner:{padding:12,borderRadius:10,borderWidth:1,marginBottom:12},
+  eventAttendanceTitle:{fontSize:12,fontWeight:'bold',marginBottom:4},
+  eventAttendanceText:{fontSize:12},
   activeTabBtn: {
     backgroundColor: '#3B82F6',
   },

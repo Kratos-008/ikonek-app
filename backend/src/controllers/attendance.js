@@ -14,6 +14,19 @@ const toDateKey = (value) => {
 };
 
 const dateFromKey = (dateKey) => new Date(`${dateKey}T00:00:00.000Z`);
+const MANILA_TIME_ZONE = "Asia/Manila";
+
+const getManilaDateKey = (value = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: MANILA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const map = Object.fromEntries(parts.map(({ type, value: partValue }) => [type, partValue]));
+  return `${map.year}-${map.month}-${map.day}`;
+};
+
 
 // Create/update today's attendance record for a youth.
 const checkIn = async (req, res) => {
@@ -21,10 +34,10 @@ const checkIn = async (req, res) => {
     const { youthId, eventId, date, status = "PRESENT" } = req.body;
     const dateKey = toDateKey(date);
 
-    if (!youthId || !dateKey) {
+    if (!youthId || !dateKey || !eventId) {
       return res.status(400).json({
         success: false,
-        message: "youthId and a valid date are required",
+        message: "youthId, eventId and a valid date are required",
       });
     }
 
@@ -39,14 +52,22 @@ const checkIn = async (req, res) => {
       });
     }
 
-    if (eventId) {
-      const event = await prisma.event.findUnique({ where: { id: eventId } });
-      if (!event) {
-        return res.status(404).json({
-          success: false,
-          message: "Event not found",
-        });
-      }
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) {
+      return res.status(404).json({
+        success: false,
+        message: "Event not found",
+      });
+    }
+
+    // Attendance is only valid on the exact event date (Philippine time).
+    const eventDateKey = getManilaDateKey(event.date);
+    const todayKey = getManilaDateKey();
+    if (eventDateKey !== todayKey || dateKey !== eventDateKey) {
+      return res.status(400).json({
+        success: false,
+        message: `Attendance is only available on the event date (${eventDateKey}).`,
+      });
     }
 
     const attendance = await prisma.attendance.upsert({
