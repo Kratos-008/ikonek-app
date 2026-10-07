@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import{ 
   StyleSheet, 
   View, 
@@ -23,6 +23,28 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
 
   const [enteredCode, setEnteredCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resendAvailableAt, setResendAvailableAt] = useState(null);
+  const [resendSeconds, setResendSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!resendAvailableAt) {
+      setResendSeconds(0);
+      return;
+    }
+
+    const updateCountdown = () => {
+      const seconds = Math.max(0, Math.ceil((new Date(resendAvailableAt).getTime() - Date.now()) / 1000));
+      setResendSeconds(seconds);
+
+      if (seconds === 0) {
+        setResendAvailableAt(null);
+      }
+    };
+
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 1000);
+    return () => clearInterval(timer);
+  }, [resendAvailableAt]);
 
   const API_URL = 'https://ikonek-app.onrender.com';
 
@@ -59,6 +81,22 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
       const data = await response.json();
 
       if (!response.ok) {
+        // The account already exists but has not been verified yet.
+        // Do not try to register it again; take the user to the
+        // verification screen where they can enter or resend the code.
+        if (data?.code === 'EMAIL_NOT_VERIFIED') {
+          setEnteredCode('');
+          setResendAvailableAt(data?.verificationExpiresAt || null);
+          setStep('verify');
+          Alert.alert(
+            "Email Not Verified",
+            data?.message ||
+              "This email is already registered but has not been verified yet.",
+            [{ text: "Enter Code", style: "cancel" }]
+          );
+          return;
+        }
+
         Alert.alert(
           "Registration Failed",
           data?.message || "Failed to create account."
@@ -67,6 +105,7 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
       }
 
       setEnteredCode('');
+      setResendAvailableAt(data?.verificationExpiresAt || null);
       setStep('verify');
 
       Alert.alert(
@@ -146,6 +185,14 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
   const handleResendCode = async () => {
     if (loading) return;
 
+    if (resendSeconds > 0) {
+      Alert.alert(
+        "Please Wait",
+        `You can request a new verification code after ${resendSeconds} second${resendSeconds === 1 ? '' : 's'}.`
+      );
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -171,7 +218,8 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
       }
 
       setEnteredCode('');
-      Alert.alert("Code Sent", "A new verification code has been sent to your email.");
+      setResendAvailableAt(data?.verificationExpiresAt || null);
+      Alert.alert("Code Sent", "A new verification code has been sent to your email. You can request another code after it expires in 10 minutes.");
     } catch (error) {
       console.error("Resend verification error:", error);
       Alert.alert("Connection Error", "Could not connect to the server. Please try again.");
@@ -226,15 +274,23 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.backToSignContainer}
-            onPress={handleResendCode}
-            disabled={loading}
-          >
-            <Text style={styles.backToSignText}>
-              Resend Verification Code
-            </Text>
-          </TouchableOpacity>
+          {resendSeconds > 0 ? (
+            <View style={styles.resendCountdownContainer}>
+              <Text style={styles.resendCountdownText}>
+                {`Resend available in ${Math.floor(resendSeconds / 60)}:${String(resendSeconds % 60).padStart(2, '0')}`}
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.backToSignContainer, loading && styles.disabledButton]}
+              onPress={handleResendCode}
+              disabled={loading}
+            >
+              <Text style={styles.backToSignText}>
+                {loading ? 'Sending...' : 'Resend Verification Code'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={styles.backToSignContainer}
@@ -435,6 +491,23 @@ const styles = StyleSheet.create({
   backToSignContainer: { 
     alignItems: 'center', 
     paddingVertical: 10 
+  },
+
+  resendCountdownContainer: {
+    alignItems: 'center',
+    marginTop: 18,
+    marginBottom: 6,
+  },
+
+  resendCountdownText: {
+    color: '#94A3B8',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  disabledButton: {
+    opacity: 0.5,
   },
 
   backToSignText: { 

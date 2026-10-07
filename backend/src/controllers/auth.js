@@ -53,10 +53,45 @@ const register = async (req, res) => {
 
     if (existingUser) {
       if (!existingUser.emailVerified) {
-        return res.status(409).json({
-          success: false,
-          code: "EMAIL_NOT_VERIFIED",
-          message: "This email is registered but not verified. Please verify your email or request a new code.",
+        const codeIsStillActive =
+          existingUser.verificationExpiresAt &&
+          new Date() < existingUser.verificationExpiresAt;
+
+        // If the previous code is still valid, do not generate another one.
+        // The app will show the remaining countdown and enable resend only
+        // after this expiration time.
+        if (codeIsStillActive) {
+          return res.status(409).json({
+            success: false,
+            code: "EMAIL_NOT_VERIFIED",
+            message: "This email is registered but not verified. Please enter the verification code that was sent to your email.",
+            verificationExpiresAt: existingUser.verificationExpiresAt,
+          });
+        }
+
+        // The old code has expired (or there is no usable code). Treat this
+        // registration attempt as a request for a fresh verification code.
+        try {
+          await createAndSendVerification(existingUser);
+        } catch (emailError) {
+          console.error("Verification email error for existing user:", emailError);
+          return res.status(503).json({
+            success: false,
+            code: "VERIFICATION_EMAIL_FAILED",
+            message: "Your account already exists, but we could not send a new verification email. Please try again later.",
+          });
+        }
+
+        const verificationExpiresAt = new Date(
+          Date.now() + VERIFICATION_MINUTES * 60 * 1000
+        );
+
+        return res.status(200).json({
+          success: true,
+          code: "VERIFICATION_EMAIL_SENT",
+          message: "Your previous verification code expired. A new verification code has been sent to your email.",
+          email: existingUser.email,
+          verificationExpiresAt,
         });
       }
 
@@ -96,6 +131,7 @@ const register = async (req, res) => {
       success: true,
       message: "Verification code sent to your email",
       email: user.email,
+      verificationExpiresAt: new Date(Date.now() + VERIFICATION_MINUTES * 60 * 1000),
     });
   } catch (error) {
     console.error("Register error:", error);
@@ -210,6 +246,16 @@ const resendVerification = async (req, res) => {
       });
     }
 
+    if (user.verificationExpiresAt && new Date() < user.verificationExpiresAt) {
+      const secondsRemaining = Math.ceil((user.verificationExpiresAt.getTime() - Date.now()) / 1000);
+      return res.status(429).json({
+        success: false,
+        code: "VERIFICATION_CODE_ACTIVE",
+        message: `Please wait ${secondsRemaining} second${secondsRemaining === 1 ? '' : 's'} before requesting a new verification code.`,
+        verificationExpiresAt: user.verificationExpiresAt,
+      });
+    }
+
     try {
       await createAndSendVerification(user);
     } catch (emailError) {
@@ -223,6 +269,7 @@ const resendVerification = async (req, res) => {
     res.json({
       success: true,
       message: "A new verification code has been sent to your email.",
+      verificationExpiresAt: new Date(Date.now() + VERIFICATION_MINUTES * 60 * 1000),
     });
   } catch (error) {
     console.error("Resend verification error:", error);
