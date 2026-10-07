@@ -21,11 +21,13 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const [generatedCode, setGeneratedCode] = useState('');
   const [enteredCode, setEnteredCode] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  // 1. Generate 6-digit verification code
-  const handleSendVerificationCode = () => {
+  const API_URL = 'http://192.168.1.48:5000';
+
+  // 1. Ask the backend to create the account and send a real email code
+  const handleSendVerificationCode = async () => {
     if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
       Alert.alert("Error", "Please fill in all fields.");
       return;
@@ -36,73 +38,89 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
       return;
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-    setGeneratedCode(code);
-    setEnteredCode('');
-    setStep('verify');
-
-    Alert.alert(
-      "Verification Code Sent",
-      `A 6-digit code has been sent to ${email}.\n\nYour code is: ${code}`
-    );
-  };
-
-  // 2. Verify code AND create account in backend
-  const handleVerifyCode = async () => {
-    // First check the verification code
-    if (enteredCode !== generatedCode) {
-      Alert.alert(
-        "Error",
-        "Invalid 6-digit code. Please try again."
-      );
-      return;
-    }
-
-    // Make sure the code is exactly 6 digits
-    if (enteredCode.length !== 6) {
-      Alert.alert(
-        "Error",
-        "Please enter the 6-digit verification code."
-      );
-      return;
-    }
+    if (loading) return;
 
     try {
-      // Send registration data to backend
-      const response = await fetch(
-  'https://ikonek-app.onrender.com/api/auth/register',
-  {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: fullName.trim(),
-      email: email.trim().toLowerCase(),
-      password: password,
-    }),
-  }
-);
+      setLoading(true);
 
-      // Read backend response
+      const response = await fetch(`${API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: fullName.trim(),
+          email: email.trim().toLowerCase(),
+          password,
+        }),
+      });
+
       const data = await response.json();
 
-      console.log("REGISTER RESPONSE:", data);
-
-      // Backend returned an error
       if (!response.ok) {
         Alert.alert(
           "Registration Failed",
-          data.message || "Failed to create account."
+          data?.message || "Failed to create account."
         );
         return;
       }
 
-      // Registration successful
+      setEnteredCode('');
+      setStep('verify');
+
       Alert.alert(
-        "Success",
-        "Account successfully created!",
+        "Check Your Email",
+        `A 6-digit verification code was sent to ${email.trim().toLowerCase()}.`
+      );
+    } catch (error) {
+      console.error("Registration error:", error);
+      Alert.alert(
+        "Connection Error",
+        "Could not connect to the server. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 2. Verify the code on the backend
+  const handleVerifyCode = async () => {
+    if (enteredCode.length !== 6) {
+      Alert.alert("Error", "Please enter the 6-digit verification code.");
+      return;
+    }
+
+    if (loading) return;
+
+    try {
+      setLoading(true);
+
+      const response = await fetch(`${API_URL}/api/auth/verify-email`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          code: enteredCode,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        Alert.alert(
+          "Verification Failed",
+          data?.message || "Invalid verification code."
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Email Verified",
+        "Your email has been verified. You can now sign in.",
         [
           {
             text: "OK",
@@ -114,14 +132,51 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
           },
         ]
       );
-
     } catch (error) {
-      console.error("Registration error:", error);
-
+      console.error("Verification error:", error);
       Alert.alert(
         "Connection Error",
-        "Could not connect to the server. Make sure the backend is running."
+        "Could not connect to the server. Please try again."
       );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    if (loading) return;
+
+    try {
+      setLoading(true);
+
+      const response = await fetch(`${API_URL}/api/auth/resend-verification`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        Alert.alert(
+          "Resend Failed",
+          data?.message || "Could not resend the verification code."
+        );
+        return;
+      }
+
+      setEnteredCode('');
+      Alert.alert("Code Sent", "A new verification code has been sent to your email.");
+    } catch (error) {
+      console.error("Resend verification error:", error);
+      Alert.alert("Connection Error", "Could not connect to the server. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -164,9 +219,20 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
           <TouchableOpacity
             style={styles.primaryBtn}
             onPress={handleVerifyCode}
+            disabled={loading}
           >
             <Text style={styles.btnText}>
-              Verify & Sign In
+              {loading ? 'Verifying...' : 'Verify Email'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.backToSignContainer}
+            onPress={handleResendCode}
+            disabled={loading}
+          >
+            <Text style={styles.backToSignText}>
+              Resend Verification Code
             </Text>
           </TouchableOpacity>
 
@@ -266,9 +332,10 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
         <TouchableOpacity
           style={styles.primaryBtn}
           onPress={handleSendVerificationCode}
+          disabled={loading}
         >
           <Text style={styles.btnText}>
-            Send Verification Code
+            {loading ? 'Sending...' : 'Send Verification Code'}
           </Text>
         </TouchableOpacity>
 

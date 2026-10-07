@@ -18,6 +18,10 @@ model User {
   password String
   role     UserRole @default(YOUTH)
 
+  emailVerified         Boolean   @default(true)
+  verificationCodeHash  String?
+  verificationExpiresAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
