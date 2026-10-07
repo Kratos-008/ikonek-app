@@ -24,7 +24,7 @@ export default function RegisterScreen({ onNavigateToSignIn }) {
   const [enteredCode, setEnteredCode] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const API_URL = 'https://ikonek-api.onrender.com';
+  const API_URL = 'https://ikonek-app.onrender.com';
 
   // 1. Ask the backend to create the account and send a real email code
   const handleSendVerificationCode = async () => {

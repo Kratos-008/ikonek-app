@@ -21,7 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
-const API_URL = 'https://ikonek-api.onrender.com';
+const API_URL = 'https://ikonek-app.onrender.com';
 
 // Alisin ang doble sa History: iisa lang ang pangalan kada petsa (yung pinakabago ang tinitira)
 const dedupeHistory = (list) => {

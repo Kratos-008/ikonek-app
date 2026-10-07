@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 
-const API_URL = 'https://ikonek-api.onrender.com';
+const API_URL = 'https://ikonek-app.onrender.com';
 
 export default function PrayerJournalScreen({ navigation }) {
   const [senderName, setSenderName] = useState('');

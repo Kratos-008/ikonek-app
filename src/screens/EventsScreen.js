@@ -4,7 +4,7 @@ import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/d
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'https://ikonek-api.onrender.com';
+const API_URL = 'https://ikonek-app.onrender.com';
 
 export default function EventsScreen() {
   const [events, setEvents] = useState([]);

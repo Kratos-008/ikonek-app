@@ -14,7 +14,7 @@ import { Screen } from '../components/Screen';
 import { Button } from '../components/Button';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'https://ikonek-api.onrender.com';
+const API_URL = 'https://ikonek-app.onrender.com';
 
 export function AdminDashboard({
   user,
