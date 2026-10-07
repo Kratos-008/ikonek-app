@@ -81,12 +81,14 @@ const register = async (req, res) => {
     try {
       await createAndSendVerification(user);
     } catch (emailError) {
+      // Keep the account so the user can retry with the resend-verification endpoint.
+      // Previously the account was deleted when email delivery failed.
       console.error("Verification email error:", emailError);
-      await prisma.user.delete({ where: { id: user.id } });
 
       return res.status(503).json({
         success: false,
-        message: "We could not send the verification email. Please try again later.",
+        code: "VERIFICATION_EMAIL_FAILED",
+        message: "Your account was created, but we could not send the verification email. Please try sending the verification code again.",
       });
     }
 
