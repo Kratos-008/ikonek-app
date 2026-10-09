@@ -9,6 +9,8 @@ const {
   deleteEvent,
 } = require("../controllers/events");
 
+const { authenticateToken, requireAdmin } = require("../middleware/auth");
+
 // Get all events
 router.get("/", getEvents);
 
@@ -16,12 +18,12 @@ router.get("/", getEvents);
 router.get("/:id", getEventById);
 
 // Create an event
-router.post("/", createEvent);
+router.post("/", authenticateToken, requireAdmin, createEvent);
 
 // Update an event
-router.put("/:id", updateEvent);
+router.put("/:id", authenticateToken, requireAdmin, updateEvent);
 
 // Delete an event
-router.delete("/:id", deleteEvent);
+router.delete("/:id", authenticateToken, requireAdmin, deleteEvent);
 
 module.exports = router;

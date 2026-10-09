@@ -18,10 +18,11 @@ import { CameraView, Camera } from 'expo-camera';
 import QRCode from 'react-native-qrcode-svg';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '../context/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
 
-const API_URL = 'https://ikonek-app.onrender.com';
+const API_URL = 'https://ikonek-app.onrender.com'; // Local development server
 
 // Alisin ang doble sa History: iisa lang ang pangalan kada petsa (yung pinakabago ang tinitira)
 const dedupeHistory = (list) => {
@@ -34,8 +35,15 @@ const dedupeHistory = (list) => {
   });
 };
 
-export default function AttendanceScreen() {
-  const [isDarkMode, setIsDarkMode] = useState(true);
+export default function AttendanceScreen({ navigation }) {
+  const { colors, isDarkMode } = useTheme();
+  const handleBack = () => {
+    if (navigation && typeof navigation.goBack === 'function') {
+      navigation.goBack();
+    } else if (navigation && typeof navigation.navigate === 'function') {
+      navigation.navigate('Home');
+    }
+  };
   const [activeTab, setActiveTab] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOrder, setSortOrder] = useState('A-Z');
@@ -47,6 +55,7 @@ export default function AttendanceScreen() {
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [historySearch, setHistorySearch] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Modal States
   const [modalVisible, setModalVisible] = useState(false);
@@ -132,6 +141,16 @@ export default function AttendanceScreen() {
 
   // LOAD YOUTH + PERSISTENT ATTENDANCE FROM NEON
   useEffect(() => {
+    (async () => {
+      try {
+        const savedUser = await AsyncStorage.getItem('@ikonek_user');
+        const user = savedUser ? JSON.parse(savedUser) : null;
+        setIsAdmin(String(user?.role || '').toUpperCase() === 'ADMIN');
+      } catch (error) {
+        console.error('Failed to load user role:', error);
+        setIsAdmin(false);
+      }
+    })();
     loadYouthFromDatabase();
     (async () => {
       try {
@@ -466,6 +485,7 @@ export default function AttendanceScreen() {
   // Babawas ng 1 sa count (hal. 3/4 -> 2/4) at otomatikong babalik sa tamang tab
   // (Third Timer -> Second Timer, atbp.). Naka-uncheck na rin siya sa All list.
   const handleUndoNewbiePresent = (item) => {
+    if (!isAdmin) return;
     Alert.alert(
       "Undo Present",
       `Ibabalik si ${item.name} sa ${Math.max(0, (item.presentCountNumber || 0) - 1)} / 4. Tuloy?`,
@@ -522,6 +542,7 @@ export default function AttendanceScreen() {
   };
 
   const handleDelete = (id, isRegular) => {
+    if (!isAdmin) return;
     Alert.alert(
       "Delete Record",
       "Are you sure you want to delete this record?",
@@ -553,6 +574,7 @@ export default function AttendanceScreen() {
   };
 
   const handleOpenAdd = () => {
+    if (!isAdmin) return;
     setIsEditing(false);
     setEditId(null);
     setName('');
@@ -569,6 +591,7 @@ export default function AttendanceScreen() {
   };
 
   const handleOpenEdit = (item, isRegular) => {
+    if (!isAdmin) return;
     setIsEditing(true);
     setEditId(item.id);
     setName(item.name || '');
@@ -605,6 +628,7 @@ export default function AttendanceScreen() {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleOpenAddLeader = () => {
+    if (!isAdmin) return;
     setEditLeaderId(null);
     setLName('');
     setLSex('');
@@ -617,6 +641,7 @@ export default function AttendanceScreen() {
   };
 
   const handleOpenEditLeader = (leader) => {
+    if (!isAdmin) return;
     setEditLeaderId(leader.id);
     setLName(leader.name || '');
     setLSex(leader.sex && leader.sex !== 'N/A' ? leader.sex : '');
@@ -690,6 +715,7 @@ export default function AttendanceScreen() {
   };
 
   const handleDeleteLeader = (leader) => {
+    if (!isAdmin) return;
     const memberCount = getLeaderMembers(leader).length;
     Alert.alert(
       "Delete Leader",
@@ -1063,14 +1089,14 @@ export default function AttendanceScreen() {
   const thirdTimerCount = newbieList.filter(i => i.presentCountNumber === 3).length;
 
   const theme = {
-    bg: isDarkMode ? '#0F172A' : '#F1F5F9',
-    cardBg: isDarkMode ? '#1E293B' : '#FFFFFF',
-    textMain: isDarkMode ? '#FFF' : '#0F172A',
-    textSub: isDarkMode ? '#94A3B8' : '#64748B',
-    border: isDarkMode ? '#334155' : '#CBD5E1',
-    inputBg: isDarkMode ? '#0F172A' : '#F8FAFC',
+    bg: colors.bg,
+    cardBg: colors.card,
+    textMain: colors.text,
+    textSub: colors.muted,
+    border: colors.border,
+    inputBg: isDarkMode ? colors.bg : '#F8FAFC',
     tableAlt: isDarkMode ? '#172033' : '#F1F5F9',
-    tableHeader: isDarkMode ? '#0F172A' : '#E2E8F0',
+    tableHeader: isDarkMode ? colors.bg : '#E2E8F0',
     tableHeaderText: isDarkMode ? '#38BDF8' : '#0369A1'
   };
 
@@ -1078,21 +1104,19 @@ export default function AttendanceScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
 
-        {/* HEADER & THEME TOGGLE ROW */}
-        <View style={styles.headerRow}>
-          <Text style={[styles.headerTitle, { color: theme.textMain }]}>Attendance Tracker</Text>
+        {/* HEADER - styled to match EventsScreen back button */}
+        <View style={styles.topHeaderRow}>
           <TouchableOpacity
-            style={[styles.themeToggleBtn, { backgroundColor: isDarkMode ? '#334155' : '#E2E8F0', borderColor: theme.border }]}
-            onPress={() => {
-              const newMode = !isDarkMode;
-              setIsDarkMode(newMode);
-              // Theme preference is kept for this session only; no local storage.
-            }}
+            style={[styles.backButton, { borderColor: theme.border, backgroundColor: theme.cardBg }]}
+            onPress={handleBack}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
           >
-            <Text style={{ fontSize: 13, fontWeight: 'bold', color: theme.textMain }}>
-              {isDarkMode ? '☀ Light' : '🌙 Dark'}
-            </Text>
+            <Text style={[styles.backButtonText, { color: theme.textMain }]}>‹</Text>
           </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: theme.textMain }]}>Attendance Tracker</Text>
+          <View style={styles.headerRightSpacer} />
         </View>
 
         <View style={styles.topControlRow}>
@@ -1161,7 +1185,7 @@ export default function AttendanceScreen() {
         </View>
 
         {/* ADD NEW MEMBER BUTTON */}
-        {activeTab !== 'All' && (
+        {isAdmin && activeTab !== 'All' && (
           <TouchableOpacity
             style={styles.addYouthBtn}
             onPress={handleOpenAdd}
@@ -1354,22 +1378,26 @@ export default function AttendanceScreen() {
                 </View>
 
                 <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={styles.deleteBtn}
-                    onPress={() => handleDelete(item.id, isRegular)}
-                  >
-                    <Text style={styles.btnText}>🗑 Delete</Text>
-                  </TouchableOpacity>
+                  {isAdmin && (
+                    <>
+                      <TouchableOpacity
+                        style={styles.deleteBtn}
+                        onPress={() => handleDelete(item.id, isRegular)}
+                      >
+                        <Text style={styles.btnText}>🗑 Delete</Text>
+                      </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.editBtn}
-                    onPress={() => handleOpenEdit(item, isRegular)}
-                  >
-                    <Text style={styles.btnText}>✏ Edit</Text>
-                  </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.editBtn}
+                        onPress={() => handleOpenEdit(item, isRegular)}
+                      >
+                        <Text style={styles.btnText}>✏ Edit</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
 
-                  {/* BACK / UNDO: para sa Timers lang, kung namali ng Mark Present */}
-                  {!isRegular && item.isPresent && (
+                  {/* BACK / UNDO: admin-only */}
+                  {isAdmin && !isRegular && item.isPresent && (
                     <TouchableOpacity
                       style={styles.undoBtn}
                       onPress={() => handleUndoNewbiePresent(item)}
@@ -1694,18 +1722,22 @@ export default function AttendanceScreen() {
                 <Text style={[styles.modalTitle, { color: theme.textMain, marginBottom: 0 }]}>
                   👥 Leaders ({leadersList.length})
                 </Text>
-                <TouchableOpacity style={styles.modalSaveBtn} onPress={handleOpenAddLeader}>
-                  <Text style={styles.modalSaveText}>+ Add Leader</Text>
-                </TouchableOpacity>
+                {isAdmin && (
+                  <TouchableOpacity style={styles.modalSaveBtn} onPress={handleOpenAddLeader}>
+                    <Text style={styles.modalSaveText}>+ Add Leader</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-                <TouchableOpacity
-                  style={styles.historyPrintBtn}
-                  onPress={handleImportLeadersFromMembers}
-                >
-                  <Text style={styles.historyPrintBtnText}>⚡ Auto-add leaders</Text>
-                </TouchableOpacity>
+                {isAdmin && (
+                  <TouchableOpacity
+                    style={styles.historyPrintBtn}
+                    onPress={handleImportLeadersFromMembers}
+                  >
+                    <Text style={styles.historyPrintBtnText}>⚡ Auto-add leaders</Text>
+                  </TouchableOpacity>
+                )}
 
                 {/* PRINT LEADERS WITH MEMBERS */}
                 <TouchableOpacity
@@ -1747,12 +1779,16 @@ export default function AttendanceScreen() {
                         <Text style={[styles.infoText, { color: theme.textSub }]}>Contact: {leader.contact}</Text>
 
                         <View style={styles.actionRow}>
-                          <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDeleteLeader(leader)}>
-                            <Text style={styles.btnText}>🗑 Delete</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity style={styles.editBtn} onPress={() => handleOpenEditLeader(leader)}>
-                            <Text style={styles.btnText}>✏ Edit</Text>
-                          </TouchableOpacity>
+                          {isAdmin && (
+                            <>
+                              <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDeleteLeader(leader)}>
+                                <Text style={styles.btnText}>🗑 Delete</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity style={styles.editBtn} onPress={() => handleOpenEditLeader(leader)}>
+                                <Text style={styles.btnText}>✏ Edit</Text>
+                              </TouchableOpacity>
+                            </>
+                          )}
                           <TouchableOpacity
                             style={[styles.presentBtn, { backgroundColor: '#059669' }]}
                             onPress={() => handleOpenAddMemberForLeader(leader)}
@@ -1784,20 +1820,22 @@ export default function AttendanceScreen() {
                                 </Text>
                                 <Text style={[styles.infoText, { color: theme.textSub }]}>{m.address}</Text>
                               </View>
-                              <View style={{ flexDirection: 'row', gap: 6 }}>
-                                <TouchableOpacity
-                                  style={[styles.smallBtn, { backgroundColor: '#1E3A8A' }]}
-                                  onPress={() => handleOpenEditMember(m)}
-                                >
-                                  <Text style={styles.btnText}>✏</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={[styles.smallBtn, { backgroundColor: '#7F1D1D' }]}
-                                  onPress={() => handleDelete(m.id, true)}
-                                >
-                                  <Text style={styles.btnText}>🗑</Text>
-                                </TouchableOpacity>
-                              </View>
+                              {isAdmin && (
+                                <View style={{ flexDirection: 'row', gap: 6 }}>
+                                  <TouchableOpacity
+                                    style={[styles.smallBtn, { backgroundColor: '#1E3A8A' }]}
+                                    onPress={() => handleOpenEditMember(m)}
+                                  >
+                                    <Text style={styles.btnText}>✏</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[styles.smallBtn, { backgroundColor: '#7F1D1D' }]}
+                                    onPress={() => handleDelete(m.id, true)}
+                                  >
+                                    <Text style={styles.btnText}>🗑</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              )}
                             </View>
                           ))
                         )}
@@ -1996,6 +2034,30 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 40,
   },
+  topHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    minHeight: 42,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  backButtonText: {
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: '700',
+    marginTop: -2,
+  },
+  headerRightSpacer: {
+    width: 40,
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2005,13 +2067,9 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 22,
     fontWeight: 'bold',
+    flex: 1,
   },
-  themeToggleBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
+
   topControlRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

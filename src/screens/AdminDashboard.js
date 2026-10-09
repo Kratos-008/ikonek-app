@@ -13,6 +13,7 @@ import {
 import { Screen } from '../components/Screen';
 import { Button } from '../components/Button';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '../context/ThemeContext';
 
 const API_URL = 'https://ikonek-app.onrender.com'; // Replace with your backend API URL
 
@@ -24,6 +25,11 @@ export function AdminDashboard({
   onNavigate,
 }) {
   const [tab, setTab] = useState('management');
+
+  const { colors, isDarkMode } = useTheme();
+  const primary = isDarkMode ? '#38BDF8' : primary;
+  const styles = createStyles(colors, primary, isDarkMode);
+
 
   const [modalVisible, setModalVisible] = useState(false);
   const [addingRole, setAddingRole] = useState('');
@@ -475,7 +481,7 @@ export function AdminDashboard({
         <View style={styles.loadingContainer}>
           <ActivityIndicator
             size="large"
-            color="#2563EB"
+            color="primary"
           />
 
           <Text style={styles.loadingText}>
@@ -600,7 +606,7 @@ export function AdminDashboard({
               >
                 {isUpdating ? (
                   <ActivityIndicator
-                    color="#FFFFFF"
+                    color="'#FFFFFF'FFF"
                   />
                 ) : (
                   <Text
@@ -628,7 +634,7 @@ export function AdminDashboard({
               >
                 {isUpdating ? (
                   <ActivityIndicator
-                    color="#FFFFFF"
+                    color="'#FFFFFF'FFF"
                   />
                 ) : (
                   <Text
@@ -998,7 +1004,7 @@ export function AdminDashboard({
             >
               {prayerLoading ? (
                 <ActivityIndicator
-                  color="#2563EB"
+                  color="primary"
                   size="small"
                 />
               ) : (
@@ -1063,7 +1069,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="e.g. Juan Dela Cruz"
-                    placeholderTextColor="#94A3B8"
+                    placeholderTextColor="colors.muted"
                     value={fullName}
                     onChangeText={
                       setFullName
@@ -1087,7 +1093,7 @@ export function AdminDashboard({
                       <TextInput
                         style={styles.input}
                         placeholder="e.g. 18"
-                        placeholderTextColor="#94A3B8"
+                        placeholderTextColor="colors.muted"
                         keyboardType="numeric"
                         value={age}
                         onChangeText={
@@ -1172,7 +1178,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="Enter complete address"
-                    placeholderTextColor="#94A3B8"
+                    placeholderTextColor="colors.muted"
                     value={address}
                     onChangeText={
                       setAddress
@@ -1188,7 +1194,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="Name of Cell Leader"
-                    placeholderTextColor="#94A3B8"
+                    placeholderTextColor="colors.muted"
                     value={cellLeader}
                     onChangeText={
                       setCellLeader
@@ -1268,7 +1274,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="Full Name"
-                    placeholderTextColor="#94A3B8"
+                    placeholderTextColor="colors.muted"
                     value={genericName}
                     onChangeText={
                       setGenericName
@@ -1284,7 +1290,7 @@ export function AdminDashboard({
                   <TextInput
                     style={styles.input}
                     placeholder="Password (Default: 123456)"
-                    placeholderTextColor="#94A3B8"
+                    placeholderTextColor="colors.muted"
                     secureTextEntry
                     value={genericPassword}
                     onChangeText={
@@ -1335,7 +1341,7 @@ export function AdminDashboard({
 // STYLES
 // =====================================================
 
-const styles = StyleSheet.create({
+const createStyles = (colors, primary, isDarkMode) => StyleSheet.create({
   // ==========================================
   // GENERAL
   // ==========================================
@@ -1347,7 +1353,7 @@ const styles = StyleSheet.create({
   },
 
   backBtnText: {
-    color: '#2563EB',
+    color: primary,
     fontWeight: 'bold',
     fontSize: 14,
   },
@@ -1355,13 +1361,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#1A2B4C',
+    color: colors.text,
     textAlign: 'center',
   },
 
   sub: {
     fontSize: 13,
-    color: '#64748B',
+    color: colors.muted,
     textAlign: 'center',
     marginBottom: 15,
   },
@@ -1372,7 +1378,7 @@ const styles = StyleSheet.create({
 
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
+    backgroundColor: (isDarkMode ? '#1E293B' : '#F1F5F9'),
     borderRadius: 10,
     padding: 4,
     marginBottom: 15,
@@ -1388,18 +1394,18 @@ const styles = StyleSheet.create({
   },
 
   tabActive: {
-    backgroundColor: '#2563EB',
+    backgroundColor: primary,
   },
 
   tabText: {
-    color: '#64748B',
+    color: colors.muted,
     fontWeight: '600',
     fontSize: 11,
     textAlign: 'center',
   },
 
   tabTextActive: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 11,
     textAlign: 'center',
@@ -1413,7 +1419,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1A2B4C',
+    color: colors.text,
     marginBottom: 5,
   },
 
@@ -1422,27 +1428,27 @@ const styles = StyleSheet.create({
   // ==========================================
 
   actionBtn: {
-    backgroundColor: '#2563EB',
+    backgroundColor: primary,
     padding: 14,
     borderRadius: 10,
     alignItems: 'center',
   },
 
   actionBtnText: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 15,
   },
 
   outlineBtn: {
-    backgroundColor: '#FFF',
+    backgroundColor: colors.card,
     borderWidth: 1.5,
-    borderColor: '#2563EB',
+    borderColor: primary,
     marginTop: 10,
   },
 
   outlineBtnText: {
-    color: '#2563EB',
+    color: primary,
     fontWeight: 'bold',
     fontSize: 15,
   },
@@ -1457,7 +1463,7 @@ const styles = StyleSheet.create({
   },
 
   emptyText: {
-    color: '#94A3B8',
+    color: colors.muted,
     textAlign: 'center',
     marginTop: 20,
   },
@@ -1475,33 +1481,33 @@ const styles = StyleSheet.create({
   filterChip: {
     flex: 1,
     paddingVertical: 8,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: (isDarkMode ? '#1E293B' : '#F1F5F9'),
     borderRadius: 20,
     alignItems: 'center',
   },
 
   filterChipActive: {
-    backgroundColor: '#1E293B',
+    backgroundColor: (isDarkMode ? '#334155' : '#1E293B'),
   },
 
   filterText: {
     fontSize: 13,
-    color: '#64748B',
+    color: colors.muted,
     fontWeight: '600',
   },
 
   filterTextActive: {
     fontSize: 13,
-    color: '#FFF',
+    color: '#FFFFFF',
     fontWeight: '600',
   },
 
   userCard: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: (isDarkMode ? '#0F172A' : '#F8FAFC'),
     padding: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     marginBottom: 8,
   },
 
@@ -1515,12 +1521,12 @@ const styles = StyleSheet.create({
   userName: {
     fontWeight: 'bold',
     fontSize: 16,
-    color: '#1E293B',
+    color: (isDarkMode ? '#334155' : '#1E293B'),
     flex: 1,
   },
 
   userDetail: {
-    color: '#64748B',
+    color: colors.muted,
     fontSize: 13,
     marginTop: 2,
   },
@@ -1565,7 +1571,7 @@ const styles = StyleSheet.create({
   },
 
   prayerCount: {
-    color: '#64748B',
+    color: colors.muted,
     fontSize: 12,
     marginTop: 2,
   },
@@ -1573,17 +1579,17 @@ const styles = StyleSheet.create({
   refreshButton: {
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: (isDarkMode ? '#0F2A44' : '#EFF6FF'),
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#BFDBFE',
+    borderColor: (isDarkMode ? '#1E4D73' : '#BFDBFE'),
     minWidth: 80,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   refreshText: {
-    color: '#2563EB',
+    color: primary,
     fontWeight: 'bold',
     fontSize: 13,
   },
@@ -1595,16 +1601,16 @@ const styles = StyleSheet.create({
 
   loadingText: {
     marginTop: 12,
-    color: '#64748B',
+    color: colors.muted,
     fontSize: 14,
   },
 
   emptyPrayerCard: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: (isDarkMode ? '#0F172A' : '#F8FAFC'),
     borderRadius: 12,
     padding: 25,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     alignItems: 'center',
   },
 
@@ -1616,12 +1622,12 @@ const styles = StyleSheet.create({
   emptyPrayerTitle: {
     fontSize: 17,
     fontWeight: 'bold',
-    color: '#1E293B',
+    color: (isDarkMode ? '#334155' : '#1E293B'),
     marginBottom: 6,
   },
 
   emptyPrayerText: {
-    color: '#64748B',
+    color: colors.muted,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -1632,7 +1638,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -1655,19 +1661,19 @@ const styles = StyleSheet.create({
   },
 
   requesterName: {
-    color: '#1E293B',
+    color: (isDarkMode ? '#334155' : '#1E293B'),
     fontSize: 16,
     fontWeight: 'bold',
   },
 
   requesterEmail: {
-    color: '#64748B',
+    color: colors.muted,
     fontSize: 12,
     marginTop: 3,
   },
 
   prayerDate: {
-    color: '#94A3B8',
+    color: colors.muted,
     fontSize: 11,
     marginTop: 8,
   },
@@ -1700,16 +1706,16 @@ const styles = StyleSheet.create({
   },
 
   prayerContentBox: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: (isDarkMode ? '#0F172A' : '#F8FAFC'),
     borderRadius: 8,
     padding: 12,
     marginTop: 12,
     borderLeftWidth: 3,
-    borderLeftColor: '#2563EB',
+    borderLeftColor: primary,
   },
 
   prayerContent: {
-    color: '#334155',
+    color: (isDarkMode ? '#CBD5E1' : '#334155'),
     fontSize: 14,
     lineHeight: 21,
   },
@@ -1789,7 +1795,7 @@ const styles = StyleSheet.create({
   },
 
   modalContainer: {
-    backgroundColor: '#FFF',
+    backgroundColor: colors.card,
     padding: 20,
     borderRadius: 12,
     gap: 10,
@@ -1798,7 +1804,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1A2B4C',
+    color: colors.text,
     textAlign: 'center',
     marginBottom: 5,
   },
@@ -1806,18 +1812,18 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#475569',
+    color: colors.muted,
     marginTop: 4,
   },
 
   input: {
     borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderColor: colors.border,
     padding: 10,
     borderRadius: 8,
     fontSize: 14,
-    backgroundColor: '#F8FAFC',
-    color: '#1E293B',
+    backgroundColor: (isDarkMode ? '#0F172A' : '#F8FAFC'),
+    color: (isDarkMode ? '#334155' : '#1E293B'),
   },
 
   formRow: {
@@ -1837,24 +1843,24 @@ const styles = StyleSheet.create({
   sexBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderColor: colors.border,
     padding: 10,
     borderRadius: 8,
     alignItems: 'center',
   },
 
   sexBtnActive: {
-    backgroundColor: '#2563EB',
-    borderColor: '#2563EB',
+    backgroundColor: primary,
+    borderColor: primary,
   },
 
   sexText: {
-    color: '#64748B',
+    color: colors.muted,
     fontWeight: '600',
   },
 
   sexTextActive: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontWeight: '600',
   },
 
@@ -1866,7 +1872,7 @@ const styles = StyleSheet.create({
   catBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderColor: colors.border,
     padding: 12,
     borderRadius: 8,
     alignItems: 'center',
@@ -1883,12 +1889,12 @@ const styles = StyleSheet.create({
   },
 
   catText: {
-    color: '#64748B',
+    color: colors.muted,
     fontWeight: '600',
   },
 
   catTextActive: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontWeight: 'bold',
   },
 
@@ -1900,7 +1906,7 @@ const styles = StyleSheet.create({
 
   saveBtn: {
     flex: 1,
-    backgroundColor: '#2563EB',
+    backgroundColor: primary,
     padding: 12,
     borderRadius: 8,
     alignItems: 'center',
@@ -1908,14 +1914,14 @@ const styles = StyleSheet.create({
 
   cancelBtn: {
     flex: 1,
-    backgroundColor: '#64748B',
+    backgroundColor: colors.muted,
     padding: 12,
     borderRadius: 8,
     alignItems: 'center',
   },
 
   btnText: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontWeight: 'bold',
   },
 });

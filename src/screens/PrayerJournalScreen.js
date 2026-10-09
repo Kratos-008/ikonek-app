@@ -17,11 +17,14 @@ import {
 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '../context/ThemeContext';
 import * as ImagePicker from 'expo-image-picker';
 
 const API_URL = 'https://ikonek-app.onrender.com';
 
 export default function PrayerJournalScreen({ navigation }) {
+  const { isDarkMode, colors } = useTheme();
+  const styles = createStyles(isDarkMode, colors);
   const [senderName, setSenderName] = useState('');
   const [devotionTitle, setDevotionTitle] = useState('');
   const [biblePassage, setBiblePassage] = useState('');
@@ -552,22 +555,39 @@ export default function PrayerJournalScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar
-        barStyle="light-content"
-        backgroundColor="#0F172A"
+        barStyle={isDarkMode ? "light-content" : "dark-content"}
+        backgroundColor={colors.bg}
       />
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation?.goBack?.()}
-        >
-          <Text style={styles.backText}>
-            ← Back
-          </Text>
-        </TouchableOpacity>
+        {/* HEADER - matches the Attendance and Events back button style */}
+        <View style={styles.topHeaderRow}>
+          <TouchableOpacity
+            style={[
+              styles.backButton,
+              {
+                borderColor: colors.border,
+                backgroundColor: colors.card,
+              },
+            ]}
+            onPress={() => {
+              if (navigation && typeof navigation.goBack === 'function') {
+                navigation.goBack();
+              } else if (navigation && typeof navigation.navigate === 'function') {
+                navigation.navigate('Home');
+              }
+            }}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Text style={[styles.backButtonText, { color: colors.text }]}>‹</Text>
+          </TouchableOpacity>
+          <View style={styles.headerRightSpacer} />
+        </View>
 
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>
@@ -832,10 +852,10 @@ export default function PrayerJournalScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (isDarkMode, colors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.bg,
   },
 
   scroll: {
@@ -850,12 +870,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: 1,
-    borderBottomColor: '#1E293B',
-    backgroundColor: '#0F172A',
+    borderBottomColor: isDarkMode ? '#1E293B' : '#FFFFFF',
+    backgroundColor: colors.bg,
   },
 
   logoText: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 25,
     fontWeight: '800',
     letterSpacing: 0.5,
@@ -865,9 +885,9 @@ const styles = StyleSheet.create({
     height: 52,
     paddingHorizontal: 18,
     borderRadius: 11,
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -884,35 +904,53 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  backButton: {
-    marginTop: 26,
-    marginBottom: 27,
+  topHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 16,
+    minHeight: 42,
   },
 
-  backText: {
-    color: '#60A5FA',
-    fontSize: 24,
+  backButton: {
+    width: 40,
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+
+  backButtonText: {
+    fontSize: 30,
+    lineHeight: 34,
     fontWeight: '700',
+    marginTop: -2,
+  },
+
+  headerRightSpacer: {
+    width: 40,
   },
 
   formCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.card,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.border,
     padding: 29,
     marginBottom: 39,
   },
 
   formTitle: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 25,
     fontWeight: '700',
     marginBottom: 22,
   },
 
   accountLabel: {
-    color: '#94A3B8',
+    color: colors.muted,
     fontSize: 13,
     fontWeight: '700',
     marginBottom: 7,
@@ -920,9 +958,9 @@ const styles = StyleSheet.create({
 
   accountBox: {
     minHeight: 58,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.border,
     borderRadius: 14,
     paddingHorizontal: 16,
     flexDirection: 'row',
@@ -936,19 +974,19 @@ const styles = StyleSheet.create({
   },
 
   accountName: {
-    color: '#60A5FA',
+    color: isDarkMode ? '#60A5FA' : '#2563EB',
     fontSize: 17,
     fontWeight: '800',
   },
 
   input: {
     height: 70,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.bg,
     borderWidth: 2,
-    borderColor: '#26364B',
+    borderColor: colors.border,
     borderRadius: 14,
     paddingHorizontal: 18,
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 18,
     marginBottom: 18,
   },
@@ -971,13 +1009,13 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 67,
     borderRadius: 14,
-    backgroundColor: '#34475C',
+    backgroundColor: isDarkMode ? '#334155' : '#E2E8F0',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   mediaText: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 20,
     fontWeight: '700',
   },
@@ -990,7 +1028,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 180,
     borderRadius: 14,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.bg,
   },
 
   removeImageButton: {
@@ -1007,13 +1045,13 @@ const styles = StyleSheet.create({
   postButton: {
     height: 70,
     borderRadius: 14,
-    backgroundColor: '#2563EB',
+    backgroundColor: isDarkMode ? '#2563EB' : '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   postButtonText: {
-    color: '#FFFFFF',
+    color: colors.text,
     fontSize: 20,
     fontWeight: '800',
   },
@@ -1030,14 +1068,14 @@ const styles = StyleSheet.create({
   },
 
   requestsTitle: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 26,
     fontWeight: '800',
     flex: 1,
   },
 
   refreshText: {
-    color: '#60A5FA',
+    color: isDarkMode ? '#60A5FA' : '#2563EB',
     fontSize: 14,
     fontWeight: '700',
     marginLeft: 10,
@@ -1049,17 +1087,17 @@ const styles = StyleSheet.create({
   },
 
   loadingText: {
-    color: '#94A3B8',
+    color: colors.muted,
     marginTop: 12,
     fontSize: 15,
   },
 
   emptyCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.card,
     borderRadius: 18,
     padding: 28,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.border,
     alignItems: 'center',
   },
 
@@ -1069,26 +1107,26 @@ const styles = StyleSheet.create({
   },
 
   emptyTitle: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 19,
     fontWeight: '800',
     marginBottom: 8,
   },
 
   emptyText: {
-    color: '#94A3B8',
+    color: colors.muted,
     textAlign: 'center',
     lineHeight: 21,
     fontSize: 14,
   },
 
   requestCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.card,
     borderRadius: 18,
     padding: 22,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.border,
   },
 
   requestTopRow: {
@@ -1104,14 +1142,14 @@ const styles = StyleSheet.create({
   },
 
   senderLabel: {
-    color: '#94A3B8',
+    color: colors.muted,
     fontSize: 12,
     fontWeight: '700',
     marginBottom: 3,
   },
 
   senderName: {
-    color: '#60A5FA',
+    color: isDarkMode ? '#60A5FA' : '#2563EB',
     fontSize: 16,
     fontWeight: '800',
   },
@@ -1124,13 +1162,13 @@ const styles = StyleSheet.create({
   },
 
   deleteButtonText: {
-    color: '#FFFFFF',
+    color: colors.text,
     fontSize: 12,
     fontWeight: '800',
   },
 
   reqTitle: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 20,
     lineHeight: 27,
     fontWeight: '800',
@@ -1138,14 +1176,14 @@ const styles = StyleSheet.create({
   },
 
   biblePassage: {
-    color: '#93C5FD',
+    color: isDarkMode ? '#93C5FD' : '#2563EB',
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 13,
   },
 
   reqContent: {
-    color: '#E2E8F0',
+    color: colors.text,
     fontSize: 16,
     lineHeight: 24,
     fontWeight: '500',
@@ -1156,7 +1194,7 @@ const styles = StyleSheet.create({
     height: 190,
     borderRadius: 14,
     marginTop: 16,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.bg,
   },
 
   requestFooter: {
@@ -1167,7 +1205,7 @@ const styles = StyleSheet.create({
   },
 
   reqDate: {
-    color: '#94A3B8',
+    color: colors.muted,
     fontSize: 13,
   },
 
@@ -1186,7 +1224,7 @@ const styles = StyleSheet.create({
   },
 
   statusText: {
-    color: '#FFFFFF',
+    color: colors.text,
     fontSize: 11,
     fontWeight: '800',
   },
