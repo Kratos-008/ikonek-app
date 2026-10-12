@@ -8,7 +8,13 @@ datasource db {
 
 enum UserRole {
   YOUTH
+  LEADER
   ADMIN
+}
+
+enum MemberRole {
+  YOUTH
+  LEADER
 }
 
 model User {
@@ -22,6 +28,12 @@ model User {
   verificationCodeHash  String?
   verificationExpiresAt DateTime?
 
+  passwordResetCodeHash String?
+  passwordResetExpiresAt DateTime?
+
+  // Hash of a member-linking code supplied during registration.
+  pendingMemberLinkCodeHash String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -30,6 +42,7 @@ model User {
 
   prayerRequests PrayerRequest[]
   attendanceRecords Attendance[] @relation("AttendanceUser")
+  notifications Notification[]
 }
 
 model YouthProfile {
@@ -47,6 +60,12 @@ model YouthProfile {
   address    String?
   cellLeader String?
   category   String?
+
+  // Admin-approved role for this member once they create an account.
+  accountRole MemberRole @default(YOUTH)
+
+  // One-time code hash used to link an account to this existing member.
+  registrationCodeHash String? @unique
 
   // Profile photo URI for now
   image String?
@@ -68,7 +87,9 @@ model Event {
 
   attendees     String[] @default([])
   category      String   @default("Upcoming")
+  attendanceFinalized Boolean @default(false)
   flowOfProgram String?
+  message       String?
 
   attendanceRecords Attendance[]
 }
@@ -101,9 +122,29 @@ model PrayerRequest {
   biblePassage  String?
   content       String
   imageUrl      String?
+  // Nullable postType preserves classification of legacy entries until reviewed.
+  postType      String?
+  visibility    String   @default("PRIVATE")
+  testimony     String?
   status        String   @default("PENDING")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  relatedId String?
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
 }
