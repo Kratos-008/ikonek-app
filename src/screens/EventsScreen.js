@@ -24,8 +24,33 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useTheme } from '../context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import * as Print from 'expo-print';
 
 const API_URL = 'https://ikonek-app.onrender.com';
+
+const normalizeAttendeeName = (value) =>
+  String(value || '').trim().toLowerCase();
+
+const getAttendeeAttendanceStatus = (event, attendeeName) => {
+  const normalizedName = normalizeAttendeeName(attendeeName);
+  const record = (Array.isArray(event?.attendanceRecords)
+    ? event.attendanceRecords
+    : []
+  ).find(
+    (item) =>
+      normalizeAttendeeName(item?.youth?.name) === normalizedName
+  );
+
+  if (record?.status) {
+    return String(record.status).toUpperCase() === 'PRESENT'
+      ? 'Present'
+      : String(record.status).toUpperCase() === 'ABSENT'
+        ? 'Absent'
+        : 'Not Yet Marked';
+  }
+
+  return event?.attendanceFinalized ? 'Absent' : 'Not Yet Marked';
+};
 
 export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
   const { isDarkMode, colors } = useTheme();
@@ -58,6 +83,10 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [printEvent, setPrintEvent] = useState(null);
+  const [printPreviewVisible, setPrintPreviewVisible] = useState(false);
+  const [printBackground, setPrintBackground] = useState('#FFFFFF');
+  const [printBackgroundImage, setPrintBackgroundImage] = useState('');
 
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -65,8 +94,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
   const [editDate, setEditDate] = useState('');
   const [editLocation, setEditLocation] = useState('');
   const [editFlow, setEditFlow] = useState('');
-  const defaultWelcomeMessage = 'Welcome, everyone! Join us to build meaningful friendships and grow closer to God.';
-  const [editMessage, setEditMessage] = useState(defaultWelcomeMessage);
+  const [editMessage, setEditMessage] = useState('');
   const [editCategory, setEditCategory] =
     useState('Upcoming');
 
@@ -91,6 +119,12 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
     useState(null);
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [signupModalVisible, setSignupModalVisible] = useState(false);
+  const [assignedYouth, setAssignedYouth] = useState([]);
+  const [selectedYouthIds, setSelectedYouthIds] = useState([]);
+  const [signupLoading, setSignupLoading] = useState(false);
+  const [signupSaving, setSignupSaving] = useState(false);
 
   const loadEvents = useCallback(async () => {
     try {
@@ -108,8 +142,8 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
             'Content-Type': 'application/json',
             ...(token
               ? {
-                  Authorization: `Bearer ${token}`,
-                }
+                Authorization: `Bearer ${token}`,
+              }
               : {}),
           },
         }
@@ -126,14 +160,14 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
       setEvents(
         Array.isArray(data.events)
           ? data.events.map((event) => ({
-              ...event,
-              attendees: Array.isArray(
-                event.attendees
-              )
-                ? event.attendees
-                : [],
-              reminderSet: false,
-            }))
+            ...event,
+            attendees: Array.isArray(
+              event.attendees
+            )
+              ? event.attendees
+              : [],
+            reminderSet: false,
+          }))
           : []
       );
     } catch (error) {
@@ -160,9 +194,10 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
           ? JSON.parse(savedUser)
           : null;
 
+        setCurrentUser(user);
         setIsAdmin(
           String(user?.role || '').toUpperCase() ===
-            'ADMIN'
+          'ADMIN'
         );
       } catch (error) {
         console.error(
@@ -270,8 +305,8 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
                       'application/json',
                     ...(token
                       ? {
-                          Authorization: `Bearer ${token}`,
-                        }
+                        Authorization: `Bearer ${token}`,
+                      }
                       : {}),
                   },
                 }
@@ -283,7 +318,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
               if (!response.ok) {
                 throw new Error(
                   data.message ||
-                    'Failed to delete event'
+                  'Failed to delete event'
                 );
               }
 
@@ -314,7 +349,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
               Alert.alert(
                 'Error',
                 error.message ||
-                  'Failed to delete event.'
+                'Failed to delete event.'
               );
             }
           },
@@ -483,9 +518,156 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
     }
   };
 
-  const handleOpenDetails = (event) => {
+  const handleOpenDetails = async (event) => {
     setSelectedEvent(event);
     setModalVisible(true);
+
+    // Refresh this event's attendance so the counts reflect recent check-ins.
+    try {
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      const response = await fetch(`${API_URL}/api/events/${event.id}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await response.json();
+      if (response.ok && data?.event) {
+        setSelectedEvent(data.event);
+        setEvents((currentEvents) =>
+          currentEvents.map((item) =>
+            item.id === data.event.id ? { ...item, ...data.event } : item
+          )
+        );
+      }
+    } catch (error) {
+      // Keep the already-loaded event details visible if refresh fails.
+      console.warn('Refresh event attendance error:', error);
+    }
+  };
+
+
+  const normalizeName = (value) =>
+    String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+  // Event.attendees stores youth names, so use the logged-in user's
+  // available name fields to determine whether self-signup already exists.
+  const hasCurrentUserSignedUp = (event) => {
+    const attendeeNames = Array.isArray(event?.attendees)
+      ? event.attendees.map(normalizeName)
+      : [];
+    const userNames = [
+      currentUser?.name,
+      currentUser?.fullName,
+      currentUser?.username,
+    ].map(normalizeName).filter(Boolean);
+
+    return userNames.some((name) => attendeeNames.includes(name));
+  };
+
+  const getSignupEventDateKey = (value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]));
+    return `${values.year}-${values.month}-${values.day}`;
+  };
+
+  const canSignUpForEvent = (event) => {
+    if (!event || event.attendanceFinalized) return false;
+    const role = String(currentUser?.role || '').toUpperCase();
+    if (!['USER', 'YOUTH', 'LEADER'].includes(role)) return false;
+    const eventKey = getSignupEventDateKey(event.date);
+    const todayKey = getSignupEventDateKey(new Date());
+    return Boolean(eventKey && todayKey && eventKey >= todayKey);
+  };
+
+  const handleYouthSelfSignup = async () => {
+    if (!selectedEvent || signupSaving) return;
+    if (hasCurrentUserSignedUp(selectedEvent)) {
+      Alert.alert('Already Signed Up', 'You are already signed up for this event.');
+      return;
+    }
+    setSignupSaving(true);
+    try {
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      if (!token) throw new Error('Please sign in again before signing up.');
+      const response = await fetch(`${API_URL}/api/events/${selectedEvent.id}/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not sign up for this event.');
+      setSelectedEvent(data.event);
+      setEvents((current) => current.map((event) => event.id === data.event.id ? { ...event, ...data.event } : event));
+      Alert.alert('Signed Up', `You are signed up for ${selectedEvent.title}.`);
+    } catch (error) {
+      Alert.alert('Event Signup', error.message || 'Could not sign up for this event.');
+    } finally {
+      setSignupSaving(false);
+    }
+  };
+
+  const openLeaderSignup = async () => {
+    if (!selectedEvent || signupLoading) return;
+    setSignupModalVisible(true);
+    setSelectedYouthIds([]);
+    setSignupLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      if (!token) throw new Error('Please sign in again before registering youth.');
+      const response = await fetch(`${API_URL}/api/youth`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not load youth members.');
+      const rows = Array.isArray(data) ? data : (data.youth || data.members || []);
+      const leaderName = normalizeName(currentUser?.name || currentUser?.fullName || currentUser?.username);
+      const registered = new Set((selectedEvent.attendees || []).map(normalizeName));
+      const assigned = rows.filter((member) =>
+        normalizeName(member.cellLeader) === leaderName && !registered.has(normalizeName(member.name))
+      );
+      setAssignedYouth(assigned);
+    } catch (error) {
+      setSignupModalVisible(false);
+      Alert.alert('Event Signup', error.message || 'Could not load your assigned youth.');
+    } finally {
+      setSignupLoading(false);
+    }
+  };
+
+  const toggleYouthSelection = (youthId) => {
+    setSelectedYouthIds((current) => current.includes(youthId)
+      ? current.filter((id) => id !== youthId)
+      : [...current, youthId]);
+  };
+
+  const submitLeaderSignup = async () => {
+    if (!selectedEvent || !selectedYouthIds.length || signupSaving) return;
+    setSignupSaving(true);
+    try {
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      if (!token) throw new Error('Please sign in again before registering youth.');
+      const response = await fetch(`${API_URL}/api/events/${selectedEvent.id}/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ youthIds: selectedYouthIds }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not register the selected youth.');
+      setSelectedEvent(data.event);
+      setEvents((current) => current.map((event) => event.id === data.event.id ? { ...event, ...data.event } : event));
+      setSignupModalVisible(false);
+      Alert.alert('Signup Saved', 'The selected youth have been signed up. Attendance has not been marked.');
+    } catch (error) {
+      Alert.alert('Event Signup', error.message || 'Could not register the selected youth.');
+    } finally {
+      setSignupSaving(false);
+    }
   };
 
   const handleOpenEdit = (event) => {
@@ -500,7 +682,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
     setEditFlow(
       event.flowOfProgram || ''
     );
-    setEditMessage(event.message || defaultWelcomeMessage);
+    setEditMessage(event.message || '');
     setEditCategory(
       getEventStatus(event.date)
     );
@@ -555,8 +737,8 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
 
             ...(token
               ? {
-                  Authorization: `Bearer ${token}`,
-                }
+                Authorization: `Bearer ${token}`,
+              }
               : {}),
           },
 
@@ -591,7 +773,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
       if (!response.ok) {
         throw new Error(
           data.message ||
-            `Failed to update event (HTTP ${response.status}).`
+          `Failed to update event (HTTP ${response.status}).`
         );
       }
 
@@ -621,7 +803,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
 
       Alert.alert(
         'Event Updated',
-        'The event form was submitted successfully. If the welcome message disappears after you reload the Events screen, the backend must also be updated to save the message in the database.'
+        'Your event details and welcome message have been saved.'
       );
     } catch (error) {
       console.error(
@@ -632,7 +814,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
       Alert.alert(
         'Error',
         error.message ||
-          'Failed to update event.'
+        'Failed to update event.'
       );
     }
   };
@@ -677,8 +859,8 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
 
             ...(token
               ? {
-                  Authorization: `Bearer ${token}`,
-                }
+                Authorization: `Bearer ${token}`,
+              }
               : {}),
           },
 
@@ -708,7 +890,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
       if (!response.ok) {
         throw new Error(
           data.message ||
-            'Failed to create event'
+          'Failed to create event'
         );
       }
 
@@ -741,52 +923,49 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
       Alert.alert(
         'Error',
         error.message ||
-          'Failed to create event.'
+        'Failed to create event.'
       );
     }
   };
 
-  const handlePrintFlow = async (event) => {
+  const handlePrintFlow = (event) => {
+    if (!event) {
+      Alert.alert('Unable to print', 'Please select an event first.');
+      return;
+    }
+    setPrintEvent(event);
+    setPrintBackground('#FFFFFF');
+    setPrintBackgroundImage('');
+    setPrintPreviewVisible(true);
+  };
+
+  const handlePrintProgram = async () => {
+    if (!printEvent) return;
+    const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[char]));
+    const flow = String(printEvent.flowOfProgram || 'No flow of program provided yet.')
+      .split(/\r?\n/)
+      .map((line) => `<p>${safe(line) || '&nbsp;'}</p>`)
+      .join('');
+    const backgroundCss = /^https?:\/\//i.test(printBackgroundImage.trim())
+      ? `background-image:linear-gradient(rgba(255,255,255,.88),rgba(255,255,255,.88)),url('${safe(printBackgroundImage.trim())}');background-size:cover;background-position:center;`
+      : `background-color:${printBackground};`;
+    const html = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
+      @page{size:A4 portrait;margin:18mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;margin:0;padding:0;${backgroundCss}}
+      .page{min-height:255mm;padding:8mm;border:1px solid #d1d5db}.brand{text-align:center;font-size:14px;font-weight:bold;letter-spacing:3px;color:#0f766e}
+      h1{text-align:center;font-size:24px;margin:10px 0 5px}.subtitle{text-align:center;color:#475569;font-size:12px;margin-bottom:22px}
+      .details{border-top:2px solid #0f766e;border-bottom:1px solid #cbd5e1;padding:12px 0;margin-bottom:22px;font-size:13px;line-height:1.7}
+      h2{font-size:16px;margin-bottom:12px;color:#0f766e}.flow{font-size:13px;line-height:1.65;overflow-wrap:anywhere}.flow p{margin:0 0 7px}
+      .footer{margin-top:30px;border-top:1px solid #cbd5e1;padding-top:10px;text-align:center;font-size:10px;color:#64748b}
+      </style></head><body><main class="page"><div class="brand">iKONEK</div><h1>${safe(printEvent.title || 'Event Program')}</h1>
+      <div class="subtitle">FLOW OF PROGRAM</div><div class="details"><strong>Date:</strong> ${safe(formatEventDate(printEvent.date))}<br>
+      <strong>Location:</strong> ${safe(printEvent.location || 'Main Church')}<br><strong>Category:</strong> ${safe(printEvent.category || 'Upcoming')}</div>
+      <h2>Program Schedule</h2><section class="flow">${flow}</section><div class="footer">iKonek • Event Program</div></main></body></html>`;
     try {
-      const attendees =
-        Array.isArray(event.attendees)
-          ? event.attendees
-          : [];
-
-      const message =
-        `=== CHURCH EVENT PROGRAM ===\n` +
-        `Event: ${event.title}\n` +
-        `Category: ${
-          event.category || 'Upcoming'
-        }\n` +
-        `Date: ${formatEventDate(
-          event.date
-        )}\n` +
-        `Location: ${
-          event.location || 'Main Church'
-        }\n\n` +
-        `[FLOW OF PROGRAM]\n` +
-        `${
-          event.flowOfProgram ||
-          'No flow of program provided yet.'
-        }\n\n` +
-        `[SIGNED-UP ATTENDEES]\n` +
-        `${
-          attendees.length
-            ? attendees.join(', ')
-            : 'No attendees yet.'
-        }\n` +
-        `==========================`;
-
-      await Share.share({
-        message,
-        title: `${event.title} - Program Flow`,
-      });
+      await Print.printAsync({ html });
     } catch (error) {
-      Alert.alert(
-        'Error',
-        'Failed to print or share program flow.'
-      );
+      Alert.alert('Printing unavailable', error?.message || 'Could not open the print interface.');
     }
   };
 
@@ -795,7 +974,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
       return (
         selectedStatus === 'All' ||
         getEventStatus(event.date) ===
-          selectedStatus
+        selectedStatus
       );
     }
   );
@@ -861,7 +1040,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
               style={[
                 styles.filterBtn,
                 selectedStatus === status &&
-                  styles.activeFilterBtn,
+                styles.activeFilterBtn,
               ]}
               onPress={() =>
                 setSelectedStatus(status)
@@ -871,7 +1050,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
                 style={[
                   styles.filterText,
                   selectedStatus === status &&
-                    styles.activeFilterText,
+                  styles.activeFilterText,
                 ]}
               >
                 {status}
@@ -901,7 +1080,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
             {selectedStatus === 'All'
               ? ''
               : selectedStatus.toLowerCase() +
-                ' '}
+              ' '}
             events found.
           </Text>
         ) : (
@@ -939,22 +1118,25 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
                   </Text>
                 </View>
               </View>
+              {item.message?.trim() ? (
+                <View style={styles.welcomePanel}>
+                  <View style={styles.welcomeHeadingRow}>
+                    <Ionicons
+                      name="heart"
+                      size={18}
+                      color={isDarkMode ? '#BFDBFE' : '#1D4ED8'}
+                      style={styles.welcomeIcon}
+                    />
+                    <Text style={styles.welcomeHeading}>
+                      A Message for You
+                    </Text>
+                  </View>
 
-              <View style={styles.welcomePanel}>
-                <View style={styles.welcomeHeadingRow}>
-                  <Ionicons
-                    name="heart"
-                    size={18}
-                    color={isDarkMode ? '#BFDBFE' : '#1D4ED8'}
-                    style={styles.welcomeIcon}
-                  />
-                  <Text style={styles.welcomeHeading}>A Message for You</Text>
+                  <Text style={styles.welcomeText}>
+                    {item.message}
+                  </Text>
                 </View>
-                <Text style={styles.welcomeText}>
-                  {item.message || defaultWelcomeMessage}
-                </Text>
-              </View>
-
+              ) : null}
               <View style={styles.eventDetailRow}>
                 <Ionicons
                   name="calendar-outline"
@@ -1000,29 +1182,29 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
                 {getEventStatus(
                   item.date
                 ) !== 'Past' && (
-                  <TouchableOpacity
-                    style={[
-                      styles.reminderBtn,
-                      item.reminderSet &&
+                    <TouchableOpacity
+                      style={[
+                        styles.reminderBtn,
+                        item.reminderSet &&
                         styles.activeReminderBtn,
-                    ]}
-                    onPress={() =>
-                      handleToggleReminder(
-                        item.id
-                      )
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.reminderBtnText
+                      ]}
+                      onPress={() =>
+                        handleToggleReminder(
+                          item.id
+                        )
                       }
                     >
-                      {item.reminderSet
-                        ? '🔔 Reminder'
-                        : '🔔 Set'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
+                      <Text
+                        style={
+                          styles.reminderBtnText
+                        }
+                      >
+                        {item.reminderSet
+                          ? '🔔 Reminder'
+                          : '🔔 Set'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
 
                 <TouchableOpacity
                   style={styles.detailsBtn}
@@ -1137,40 +1319,86 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
                     selectedEvent.attendees
                   )
                     ? selectedEvent.attendees
-                        .length
+                      .length
                     : 0}
                   ):
                 </Text>
 
-                <View
-                  style={styles.boxContent}
-                >
-                  {Array.isArray(
-                    selectedEvent.attendees
-                  ) &&
-                  selectedEvent.attendees
-                    .length ? (
-                    selectedEvent.attendees.map(
-                      (name, index) => (
-                        <Text
-                          key={index}
-                          style={
-                            styles.boxText
-                          }
-                        >
-                          • {name}
+                {(() => {
+                  const signedUpAttendees = Array.isArray(selectedEvent.attendees)
+                    ? selectedEvent.attendees
+                    : [];
+                  const attendanceCounts = signedUpAttendees.reduce(
+                    (counts, name) => {
+                      const status = getAttendeeAttendanceStatus(selectedEvent, name);
+                      counts[status] = (counts[status] || 0) + 1;
+                      return counts;
+                    },
+                    { Present: 0, Absent: 0, 'Not Yet Marked': 0 }
+                  );
+
+                  return (
+                    <>
+                      <View style={styles.boxContent}>
+                        <Text style={styles.boxText}>
+                          Signed Up: {signedUpAttendees.length}
                         </Text>
-                      )
-                    )
+                        <Text style={styles.boxText}>
+                          Present: {attendanceCounts.Present}
+                        </Text>
+                        <Text style={styles.boxText}>
+                          Absent: {attendanceCounts.Absent}
+                        </Text>
+                        <Text style={styles.boxText}>
+                          Not Yet Marked: {attendanceCounts['Not Yet Marked']}
+                        </Text>
+                      </View>
+
+                      <View style={[styles.boxContent, { marginTop: 8 }]}>
+                        {signedUpAttendees.length ? (
+                          signedUpAttendees.map((name, index) => {
+                            const status = getAttendeeAttendanceStatus(selectedEvent, name);
+                            return (
+                              <Text key={`${name}-${index}`} style={styles.boxText}>
+                                • {name} — {status}
+                              </Text>
+                            );
+                          })
+                        ) : (
+                          <Text style={styles.boxText}>
+                            No attendees signed up yet.
+                          </Text>
+                        )}
+                      </View>
+                    </>
+                  );
+                })()}
+
+                {canSignUpForEvent(selectedEvent) && ['USER', 'YOUTH'].includes(String(currentUser?.role || '').toUpperCase()) && (
+                  hasCurrentUserSignedUp(selectedEvent) ? (
+                    <View style={[styles.signupActionBtn, { opacity: 0.8 }]}>
+                      <Text style={styles.btnText}>✅ Already Signed Up</Text>
+                    </View>
                   ) : (
-                    <Text
-                      style={styles.boxText}
+                    <TouchableOpacity
+                      style={[styles.signupActionBtn, { opacity: signupSaving ? 0.65 : 1 }]}
+                      onPress={handleYouthSelfSignup}
+                      disabled={signupSaving}
                     >
-                      No attendees signed up
-                      yet.
-                    </Text>
-                  )}
-                </View>
+                      <Text style={styles.btnText}>{signupSaving ? 'Signing Up...' : '✅ Sign Up for Event'}</Text>
+                    </TouchableOpacity>
+                  )
+                )}
+
+                {canSignUpForEvent(selectedEvent) && String(currentUser?.role || '').toUpperCase() === 'LEADER' && (
+                  <TouchableOpacity
+                    style={styles.signupActionBtn}
+                    onPress={openLeaderSignup}
+                    disabled={signupLoading || signupSaving}
+                  >
+                    <Text style={styles.btnText}>{signupLoading ? 'Loading Youth...' : '👥 Sign Up Assigned Youth'}</Text>
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   style={
@@ -1248,6 +1476,52 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
         </View>
       </Modal>
 
+      {/* LEADER EVENT SIGNUP MODAL */}
+      <Modal
+        visible={signupModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setSignupModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Sign Up Assigned Youth</Text>
+            <Text style={styles.boxText}>Select youth assigned to you for {selectedEvent?.title || 'this event'}. Already signed-up youth are hidden.</Text>
+            {signupLoading ? (
+              <ActivityIndicator style={{ marginVertical: 20 }} size="large" color={primary} />
+            ) : (
+              <ScrollView style={{ maxHeight: 320, marginTop: 12 }} keyboardShouldPersistTaps="handled">
+                {assignedYouth.length ? assignedYouth.map((member) => {
+                  const checked = selectedYouthIds.includes(member.id);
+                  return (
+                    <TouchableOpacity
+                      key={member.id}
+                      style={[styles.signupYouthRow, checked && styles.signupYouthRowSelected]}
+                      onPress={() => toggleYouthSelection(member.id)}
+                    >
+                      <Ionicons name={checked ? 'checkbox' : 'square-outline'} size={22} color={checked ? primary : colors.muted} />
+                      <Text style={styles.boxText}>{member.name}</Text>
+                    </TouchableOpacity>
+                  );
+                }) : (
+                  <Text style={[styles.boxText, { marginVertical: 16 }]}>No eligible assigned youth found. Check that their Cell Leader matches your account name.</Text>
+                )}
+              </ScrollView>
+            )}
+            <TouchableOpacity
+              style={[styles.signupActionBtn, (!selectedYouthIds.length || signupSaving || signupLoading) && { opacity: 0.5 }]}
+              onPress={submitLeaderSignup}
+              disabled={!selectedYouthIds.length || signupSaving || signupLoading}
+            >
+              <Text style={styles.btnText}>{signupSaving ? 'Saving...' : `Sign Up Selected (${selectedYouthIds.length})`}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.closeModalBtn} onPress={() => setSignupModalVisible(false)}>
+              <Text style={styles.btnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* ADD EVENT MODAL */}
       <Modal
         visible={addModalVisible}
@@ -1262,221 +1536,221 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
         >
-        <View
-          style={styles.modalOverlay}
-        >
           <View
-            style={styles.modalContent}
+            style={styles.modalOverlay}
           >
-          <ScrollView
-            style={styles.editModalScrollView}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="none"
-            showsVerticalScrollIndicator={true}
-            nestedScrollEnabled
-            contentContainerStyle={styles.modalScrollContent}
-          >
-            <Text
-              style={styles.modalTitle}
+            <View
+              style={styles.modalContent}
             >
-              Add New Event
-            </Text>
-
-            <Text style={styles.label}>
-              Event Title
-            </Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Youth Camp"
-              placeholderTextColor={
-                colors.muted
-              }
-              value={newTitle}
-              onChangeText={setNewTitle}
-            />
-
-            <Text style={styles.label}>
-              Date & Time
-            </Text>
-
-            <TouchableOpacity
-              style={
-                styles.datePickerButton
-              }
-              onPress={
-                openAddDateTimePicker
-              }
-            >
-              <Text
-                style={
-                  styles.datePickerText
-                }
+              <ScrollView
+                style={styles.editModalScrollView}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="none"
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled
+                contentContainerStyle={styles.modalScrollContent}
               >
-                {newDate
-                  ? formatEventDate(
-                      newDate
-                    )
-                  : 'Select date and time'}
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={styles.modalTitle}
+                >
+                  Add New Event
+                </Text>
 
-            {showAddDatePicker && (
-              <DateTimePicker
-                value={toPickerDate(
-                  newDate
+                <Text style={styles.label}>
+                  Event Title
+                </Text>
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. Youth Camp"
+                  placeholderTextColor={
+                    colors.muted
+                  }
+                  value={newTitle}
+                  onChangeText={setNewTitle}
+                />
+
+                <Text style={styles.label}>
+                  Date & Time
+                </Text>
+
+                <TouchableOpacity
+                  style={
+                    styles.datePickerButton
+                  }
+                  onPress={
+                    openAddDateTimePicker
+                  }
+                >
+                  <Text
+                    style={
+                      styles.datePickerText
+                    }
+                  >
+                    {newDate
+                      ? formatEventDate(
+                        newDate
+                      )
+                      : 'Select date and time'}
+                  </Text>
+                </TouchableOpacity>
+
+                {showAddDatePicker && (
+                  <DateTimePicker
+                    value={toPickerDate(
+                      newDate
+                    )}
+                    mode="datetime"
+                    display="default"
+                    onValueChange={
+                      handleAddDateValueChange
+                    }
+                    onDismiss={() =>
+                      setShowAddDatePicker(
+                        false
+                      )
+                    }
+                  />
                 )}
-                mode="datetime"
-                display="default"
-                onValueChange={
-                  handleAddDateValueChange
-                }
-                onDismiss={() =>
-                  setShowAddDatePicker(
-                    false
-                  )
-                }
-              />
-            )}
 
-            <Text style={styles.dateHint}>
-              Tap to select the date and
-              time.
-            </Text>
-
-            <Text style={styles.label}>
-              Location
-            </Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Main Sanctuary"
-              placeholderTextColor={
-                colors.muted
-              }
-              value={newLocation}
-              onChangeText={
-                setNewLocation
-              }
-            />
-
-            <Text style={styles.label}>
-              Category
-            </Text>
-
-            <View
-              style={
-                styles.autoCategoryBox
-              }
-            >
-              <Text
-                style={
-                  styles.autoCategoryText
-                }
-              >
-                {newDate
-                  ? getEventStatus(
-                      newDate
-                    )
-                  : 'Select a date first'}
-              </Text>
-
-              <Text
-                style={
-                  styles.autoCategoryHint
-                }
-              >
-                Automatically determined
-                from the event date.
-              </Text>
-            </View>
-
-            <Text style={styles.label}>
-              Message for You
-            </Text>
-
-            <TextInput
-              style={[
-                styles.input,
-                styles.multilineInput,
-                styles.messageInput,
-              ]}
-              multiline
-              textAlignVertical="top"
-              placeholder="Enter a Message"
-              placeholderTextColor={colors.muted}
-              value={newMessage}
-              onChangeText={setNewMessage}
-            />
-
-            <Text style={styles.dateHint}>
-              This message appears on the event card.
-            </Text>
-
-            <Text style={styles.label}>
-              Flow of Program
-            </Text>
-
-            <TextInput
-              style={[
-                styles.input,
-                styles.multilineInput,
-              ]}
-              multiline
-              placeholder="Enter program flow..."
-              placeholderTextColor={
-                colors.muted
-              }
-              value={newFlow}
-              onChangeText={setNewFlow}
-            />
-
-            <View
-              style={styles.modalBtnRow}
-            >
-              <TouchableOpacity
-                style={[
-                  styles.modalActionBtn,
-                  {
-                    backgroundColor:
-                      colors.border,
-                  },
-                ]}
-                onPress={() =>
-                  setAddModalVisible(
-                    false
-                  )
-                }
-              >
-                <Text
-                  style={styles.btnText}
-                >
-                  Cancel
+                <Text style={styles.dateHint}>
+                  Tap to select the date and
+                  time.
                 </Text>
-              </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[
-                  styles.modalActionBtn,
-                  {
-                    backgroundColor:
-                      primary,
-                  },
-                ]}
-                onPress={
-                  handleAddEvent
-                }
-              >
-                <Text
-                  style={styles.btnText}
-                >
-                  Save Event
+                <Text style={styles.label}>
+                  Location
                 </Text>
-              </TouchableOpacity>
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. Main Sanctuary"
+                  placeholderTextColor={
+                    colors.muted
+                  }
+                  value={newLocation}
+                  onChangeText={
+                    setNewLocation
+                  }
+                />
+
+                <Text style={styles.label}>
+                  Category
+                </Text>
+
+                <View
+                  style={
+                    styles.autoCategoryBox
+                  }
+                >
+                  <Text
+                    style={
+                      styles.autoCategoryText
+                    }
+                  >
+                    {newDate
+                      ? getEventStatus(
+                        newDate
+                      )
+                      : 'Select a date first'}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.autoCategoryHint
+                    }
+                  >
+                    Automatically determined
+                    from the event date.
+                  </Text>
+                </View>
+
+                <Text style={styles.label}>
+                  Message for You
+                </Text>
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.multilineInput,
+                    styles.messageInput,
+                  ]}
+                  multiline
+                  textAlignVertical="top"
+                  placeholder="Enter a Message"
+                  placeholderTextColor={colors.muted}
+                  value={newMessage}
+                  onChangeText={setNewMessage}
+                />
+
+                <Text style={styles.dateHint}>
+                  This message appears on the event card.
+                </Text>
+
+                <Text style={styles.label}>
+                  Flow of Program
+                </Text>
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.multilineInput,
+                  ]}
+                  multiline
+                  placeholder="Enter program flow..."
+                  placeholderTextColor={
+                    colors.muted
+                  }
+                  value={newFlow}
+                  onChangeText={setNewFlow}
+                />
+
+                <View
+                  style={styles.modalBtnRow}
+                >
+                  <TouchableOpacity
+                    style={[
+                      styles.modalActionBtn,
+                      {
+                        backgroundColor:
+                          colors.border,
+                      },
+                    ]}
+                    onPress={() =>
+                      setAddModalVisible(
+                        false
+                      )
+                    }
+                  >
+                    <Text
+                      style={styles.btnText}
+                    >
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalActionBtn,
+                      {
+                        backgroundColor:
+                          primary,
+                      },
+                    ]}
+                    onPress={
+                      handleAddEvent
+                    }
+                  >
+                    <Text
+                      style={styles.btnText}
+                    >
+                      Save Event
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
-          </ScrollView>
           </View>
-        </View>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -1494,219 +1768,282 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
         >
-        <View
-          style={styles.modalOverlay}
-        >
           <View
-            style={styles.modalContent}
+            style={styles.modalOverlay}
           >
-          <ScrollView
-            style={styles.editModalScrollView}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="none"
-            showsVerticalScrollIndicator={true}
-            nestedScrollEnabled
-            contentContainerStyle={styles.modalScrollContent}
-          >
-            <Text
-              style={styles.modalTitle}
+            <View
+              style={styles.modalContent}
             >
-              Edit Event
-            </Text>
-
-            <Text style={styles.label}>
-              Event Title
-            </Text>
-
-            <TextInput
-              style={styles.input}
-              value={editTitle}
-              onChangeText={setEditTitle}
-              placeholderTextColor={
-                colors.muted
-              }
-            />
-
-            <Text style={styles.label}>
-              Date & Time
-            </Text>
-
-            <TouchableOpacity
-              style={
-                styles.datePickerButton
-              }
-              onPress={
-                openEditDateTimePicker
-              }
-            >
-              <Text
-                style={
-                  styles.datePickerText
-                }
+              <ScrollView
+                style={styles.editModalScrollView}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="none"
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled
+                contentContainerStyle={styles.modalScrollContent}
               >
-                {editDate
-                  ? formatEventDate(
-                      editDate
-                    )
-                  : 'Select date and time'}
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={styles.modalTitle}
+                >
+                  Edit Event
+                </Text>
 
-            {showEditDatePicker && (
-              <DateTimePicker
-                value={toPickerDate(
-                  editDate
+                <Text style={styles.label}>
+                  Event Title
+                </Text>
+
+                <TextInput
+                  style={styles.input}
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                  placeholderTextColor={
+                    colors.muted
+                  }
+                />
+
+                <Text style={styles.label}>
+                  Date & Time
+                </Text>
+
+                <TouchableOpacity
+                  style={
+                    styles.datePickerButton
+                  }
+                  onPress={
+                    openEditDateTimePicker
+                  }
+                >
+                  <Text
+                    style={
+                      styles.datePickerText
+                    }
+                  >
+                    {editDate
+                      ? formatEventDate(
+                        editDate
+                      )
+                      : 'Select date and time'}
+                  </Text>
+                </TouchableOpacity>
+
+                {showEditDatePicker && (
+                  <DateTimePicker
+                    value={toPickerDate(
+                      editDate
+                    )}
+                    mode="datetime"
+                    display="default"
+                    onValueChange={
+                      handleEditDateValueChange
+                    }
+                    onDismiss={() =>
+                      setShowEditDatePicker(
+                        false
+                      )
+                    }
+                  />
                 )}
-                mode="datetime"
-                display="default"
-                onValueChange={
-                  handleEditDateValueChange
-                }
-                onDismiss={() =>
-                  setShowEditDatePicker(
-                    false
-                  )
-                }
-              />
-            )}
 
-            <Text style={styles.dateHint}>
-              Tap to select the date and
-              time.
-            </Text>
+                <Text style={styles.dateHint}>
+                  Tap to select the date and
+                  time.
+                </Text>
 
-            <Text style={styles.label}>
-              Location
-            </Text>
+                <Text style={styles.label}>
+                  Location
+                </Text>
 
+                <TextInput
+                  style={styles.input}
+                  value={editLocation}
+                  onChangeText={
+                    setEditLocation
+                  }
+                  placeholderTextColor={
+                    colors.muted
+                  }
+                />
+
+                <Text style={styles.label}>
+                  Category
+                </Text>
+
+                <View
+                  style={
+                    styles.autoCategoryBox
+                  }
+                >
+                  <Text
+                    style={
+                      styles.autoCategoryText
+                    }
+                  >
+                    {editDate
+                      ? getEventStatus(
+                        editDate
+                      )
+                      : 'Unknown'}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.autoCategoryHint
+                    }
+                  >
+                    Automatically determined
+                    from the event date.
+                  </Text>
+                </View>
+
+                <Text style={styles.label}>
+                  Message for You
+                </Text>
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.multilineInput,
+                    styles.messageInput,
+                  ]}
+                  multiline
+                  value={editMessage}
+                  onChangeText={setEditMessage}
+                  placeholder="Write a welcome message for this event..."
+                  placeholderTextColor={colors.muted}
+                  textAlignVertical="top"
+                />
+
+                <Text style={styles.dateHint}>
+                  This message appears on the event card.
+                </Text>
+
+                <Text style={styles.label}>
+                  Flow of Program
+                </Text>
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.multilineInput,
+                  ]}
+                  multiline
+                  value={editFlow}
+                  onChangeText={setEditFlow}
+                  placeholderTextColor={
+                    colors.muted
+                  }
+                />
+
+                <View
+                  style={styles.modalBtnRow}
+                >
+                  <TouchableOpacity
+                    style={[
+                      styles.modalActionBtn,
+                      {
+                        backgroundColor:
+                          colors.border,
+                      },
+                    ]}
+                    onPress={() =>
+                      setEditModalVisible(
+                        false
+                      )
+                    }
+                  >
+                    <Text
+                      style={styles.btnText}
+                    >
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalActionBtn,
+                      {
+                        backgroundColor:
+                          primary,
+                      },
+                    ]}
+                    onPress={
+                      handleSaveEdit
+                    }
+                  >
+                    <Text
+                      style={styles.btnText}
+                    >
+                      Save Changes
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* PRINT FLOW CUSTOMIZATION AND PREVIEW */}
+      <Modal
+        visible={printPreviewVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setPrintPreviewVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '92%' }]}>
+            <Text style={styles.modalTitle}>Print Flow of Program</Text>
+            <Text style={styles.label}>Page setup: A4 • Portrait</Text>
+            <Text style={styles.label}>Background color</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginBottom: 12 }}>
+              {[
+                { label: 'White', value: '#FFFFFF' },
+                { label: 'Cream', value: '#FFF7E6' },
+                { label: 'Sky', value: '#EAF6FF' },
+                { label: 'Mint', value: '#E8F8F0' },
+                { label: 'Lavender', value: '#F2EDFF' },
+                { label: 'Dark', value: '#263244' },
+              ].map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  onPress={() => setPrintBackground(option.value)}
+                  style={{ paddingVertical: 8, paddingHorizontal: 11, borderRadius: 8, backgroundColor: option.value, borderWidth: printBackground === option.value ? 3 : 1, borderColor: printBackground === option.value ? primary : '#9CA3AF' }}
+                >
+                  <Text style={{ color: option.value === '#263244' ? '#FFFFFF' : '#172033', fontSize: 12 }}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.label}>Optional background image URL</Text>
             <TextInput
               style={styles.input}
-              value={editLocation}
-              onChangeText={
-                setEditLocation
-              }
-              placeholderTextColor={
-                colors.muted
-              }
-            />
-
-            <Text style={styles.label}>
-              Category
-            </Text>
-
-            <View
-              style={
-                styles.autoCategoryBox
-              }
-            >
-              <Text
-                style={
-                  styles.autoCategoryText
-                }
-              >
-                {editDate
-                  ? getEventStatus(
-                      editDate
-                    )
-                  : 'Unknown'}
-              </Text>
-
-              <Text
-                style={
-                  styles.autoCategoryHint
-                }
-              >
-                Automatically determined
-                from the event date.
-              </Text>
-            </View>
-
-            <Text style={styles.label}>
-              Message for You
-            </Text>
-
-            <TextInput
-              style={[
-                styles.input,
-                styles.multilineInput,
-                styles.messageInput,
-              ]}
-              multiline
-              value={editMessage}
-              onChangeText={setEditMessage}
-              placeholder="Write a welcome message for this event..."
+              value={printBackgroundImage}
+              onChangeText={setPrintBackgroundImage}
+              placeholder="https://example.com/background.jpg"
               placeholderTextColor={colors.muted}
-              textAlignVertical="top"
+              autoCapitalize="none"
+              keyboardType="url"
             />
-
-            <Text style={styles.dateHint}>
-              This message appears on the event card.
-            </Text>
-
-            <Text style={styles.label}>
-              Flow of Program
-            </Text>
-
-            <TextInput
-              style={[
-                styles.input,
-                styles.multilineInput,
-              ]}
-              multiline
-              value={editFlow}
-              onChangeText={setEditFlow}
-              placeholderTextColor={
-                colors.muted
-              }
-            />
-
-            <View
-              style={styles.modalBtnRow}
-            >
-              <TouchableOpacity
-                style={[
-                  styles.modalActionBtn,
-                  {
-                    backgroundColor:
-                      colors.border,
-                  },
-                ]}
-                onPress={() =>
-                  setEditModalVisible(
-                    false
-                  )
-                }
-              >
-                <Text
-                  style={styles.btnText}
-                >
-                  Cancel
-                </Text>
+            <Text style={styles.label}>Preview</Text>
+            <ScrollView style={{ maxHeight: 290, borderWidth: 1, borderColor: colors.border, borderRadius: 8, backgroundColor: printBackground, padding: 16 }}>
+              <Text style={{ textAlign: 'center', color: '#0F766E', fontWeight: '800', letterSpacing: 3 }}>iKONEK</Text>
+              <Text style={{ textAlign: 'center', color: printBackground === '#263244' ? '#FFFFFF' : '#172033', fontSize: 20, fontWeight: '800', marginTop: 10 }}>{printEvent?.title || 'Event Program'}</Text>
+              <Text style={{ textAlign: 'center', color: printBackground === '#263244' ? '#E5E7EB' : '#475569', marginBottom: 16 }}>FLOW OF PROGRAM</Text>
+              <Text style={{ color: printBackground === '#263244' ? '#FFFFFF' : '#172033', lineHeight: 22 }}>Date: {printEvent?.date ? formatEventDate(printEvent.date) : '—'}{'\n'}Location: {printEvent?.location || 'Main Church'}{'\n'}Category: {printEvent?.category || 'Upcoming'}</Text>
+              <View style={{ height: 1, backgroundColor: '#0F766E', marginVertical: 14 }} />
+              <Text style={{ color: '#0F766E', fontWeight: '800', marginBottom: 8 }}>Program Schedule</Text>
+              <Text style={{ color: printBackground === '#263244' ? '#FFFFFF' : '#172033', lineHeight: 22 }}>{printEvent?.flowOfProgram || 'No flow of program provided yet.'}</Text>
+            </ScrollView>
+            <Text style={{ color: colors.muted, fontSize: 11, marginTop: 8 }}>Background images require a publicly accessible image URL. The print layout uses an iKonek text wordmark because no logo image was included in this ZIP.</Text>
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity style={[styles.modalActionBtn, { backgroundColor: '#64748B' }]} onPress={() => setPrintPreviewVisible(false)}>
+                <Text style={styles.btnText}>Cancel</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.modalActionBtn,
-                  {
-                    backgroundColor:
-                      primary,
-                  },
-                ]}
-                onPress={
-                  handleSaveEdit
-                }
-              >
-                <Text
-                  style={styles.btnText}
-                >
-                  Save Changes
-                </Text>
+              <TouchableOpacity style={[styles.modalActionBtn, { backgroundColor: primary }]} onPress={handlePrintProgram}>
+                <Text style={styles.btnText}>Print</Text>
               </TouchableOpacity>
             </View>
-          </ScrollView>
           </View>
         </View>
-        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -2106,6 +2443,32 @@ const createStyles = (colors, isDarkMode, primary) =>
       borderRadius: 8,
       alignItems: 'center',
       marginTop: 8,
+    },
+
+    signupActionBtn: {
+      backgroundColor: primary,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      alignItems: 'center',
+      marginTop: 10,
+    },
+
+    signupYouthRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 11,
+      paddingHorizontal: 10,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginBottom: 7,
+    },
+
+    signupYouthRowSelected: {
+      borderColor: primary,
+      backgroundColor: isDarkMode ? '#0B2A3A' : '#EFF6FF',
     },
 
     printModalBtn: {
