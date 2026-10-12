@@ -28,6 +28,19 @@ import * as Print from 'expo-print';
 
 const API_URL = 'https://ikonek-app.onrender.com';
 
+// Older events may still contain the original generic welcome message.
+// Treat that legacy default as empty so it does not appear as if it were
+// the event's customized message.
+const LEGACY_DEFAULT_EVENT_MESSAGE =
+  'Welcome, everyone! Join us to build meaningful friendships and grow closer to God.';
+
+const getCustomEventMessage = (value) => {
+  const message = String(value || '').trim();
+  return message.toLowerCase() === LEGACY_DEFAULT_EVENT_MESSAGE.toLowerCase()
+    ? ''
+    : message;
+};
+
 const normalizeAttendeeName = (value) =>
   String(value || '').trim().toLowerCase();
 
@@ -682,7 +695,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
     setEditFlow(
       event.flowOfProgram || ''
     );
-    setEditMessage(event.message || '');
+    setEditMessage(getCustomEventMessage(event.message));
     setEditCategory(
       getEventStatus(event.date)
     );
@@ -1118,7 +1131,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
                   </Text>
                 </View>
               </View>
-              {item.message?.trim() ? (
+              {getCustomEventMessage(item.message) ? (
                 <View style={styles.welcomePanel}>
                   <View style={styles.welcomeHeadingRow}>
                     <Ionicons
@@ -1133,7 +1146,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
                   </View>
 
                   <Text style={styles.welcomeText}>
-                    {item.message}
+                    {getCustomEventMessage(item.message)}
                   </Text>
                 </View>
               ) : null}
