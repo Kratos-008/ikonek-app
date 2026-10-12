@@ -27,6 +27,7 @@ export default function RegisterScreen({
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] =
     useState('');
+  const [linkingCode, setLinkingCode] = useState('');
 
   const [showPassword, setShowPassword] =
     useState(false);
@@ -125,6 +126,7 @@ export default function RegisterScreen({
             name: fullName.trim(),
             email: email.trim().toLowerCase(),
             password,
+            linkingCode: linkingCode.trim() || undefined,
           }),
         }
       );
@@ -531,6 +533,24 @@ export default function RegisterScreen({
           editable={!loading}
         />
 
+        {/* OPTIONAL EXISTING MEMBER LINK CODE */}
+        <Text style={styles.label}>
+          Member Registration Code (optional)
+        </Text>
+        <TextInput
+          style={styles.input}
+          placeholder="IK-1A2B3C4D-5E6F7A8B"
+          placeholderTextColor={colors.muted}
+          value={linkingCode}
+          onChangeText={setLinkingCode}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          editable={!loading}
+        />
+        <Text style={styles.helperText}>
+          If an Admin already added you as a member, enter the one-time code they gave you to link your existing profile. Leave blank if you are registering as a new member.
+        </Text>
+
         {/* PASSWORD */}
         <Text style={styles.label}>
           Password
@@ -681,6 +701,14 @@ const createStyles = (theme) =>
       fontSize: 14,
       fontWeight: '600',
       marginBottom: 8,
+    },
+
+    helperText: {
+      color: theme.muted,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: -8,
+      marginBottom: 16,
     },
 
     input: {

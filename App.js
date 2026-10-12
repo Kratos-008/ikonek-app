@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from 'react';
 import {
   StyleSheet,
@@ -8,27 +9,81 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
-
+import LinkMemberScreen from './src/screens/LinkMemberScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
 import SignInScreen from './src/screens/SignIn';
 import RegisterScreen from './src/screens/RegisterScreen';
 import ForgotScreen from './src/screens/ForgotScreen';
 import MainScreen from './src/screens/MainScreen';
 import BibleScreen from './src/screens/BibleScreen';
 import EventsScreen from './src/screens/EventsScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
 import PrayerJournalScreen from './src/screens/PrayerJournalScreen';
 import AttendanceScreen from './src/screens/AttendanceScreen';
 import { AdminDashboard } from './src/screens/AdminDashboard';
 
+// ======================================================
+// INTRO VIDEO SCREEN
+// ======================================================
+function IntroScreen({ onFinish }) {
+  const player = useVideoPlayer(
+    require('./assets/ikonek_intro_adapted.mp4'),
+    (videoPlayer) => {
+      videoPlayer.loop = false;
+      videoPlayer.muted = false;
+      videoPlayer.play();
+    }
+  );
+
+  useEffect(() => {
+    const subscription = player.addListener('playToEnd', onFinish);
+    return () => subscription.remove();
+  }, [player, onFinish]);
+
+  return (
+    <View style={introStyles.container}>
+      <VideoView
+        player={player}
+        style={introStyles.video}
+        contentFit="contain"
+        nativeControls={false}
+        allowsFullscreen={false}
+        allowsPictureInPicture={false}
+      />
+    </View>
+  );
+}
+
+const introStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  video: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+});
+
+// ======================================================
+// MAIN APP
+// ======================================================
 function AppContent() {
   const { colors, isDarkMode } = useTheme();
 
+  const [showIntro, setShowIntro] = useState(true);
   const [currentScreen, setCurrentScreen] = useState('SignIn');
   const [currentUser, setCurrentUser] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [adminYouthView, setAdminYouthView] = useState(false);
 
   const drawerX = useRef(
     new Animated.Value(-Dimensions.get('window').width * 0.78)
@@ -55,6 +110,8 @@ function AppContent() {
   // LOGOUT
   // ==========================================
   const handleLogout = () => {
+    setAdminYouthView(false);
+
     Alert.alert(
       'Log Out',
       'Are you sure you want to log out?',
@@ -95,18 +152,18 @@ function AppContent() {
   // LOGIN SUCCESS
   // ==========================================
   const handleSignIn = (user) => {
-    console.log('Logged-in user:', user);
+    console.log('Logged-in user:', {
+      id: user?.id,
+      role: user?.role,
+    });
 
     setCurrentUser(user);
 
-    // Admin accounts go to Admin Dashboard
-    if (
-      user?.role === 'admin' ||
-      user?.role === 'superadmin'
-    ) {
+    const role = String(user?.role || '').trim().toLowerCase();
+
+    if (role === 'admin' || role === 'superadmin') {
       setCurrentScreen('AdminDashboard');
     } else {
-      // Regular users go to normal app
       setCurrentScreen('Home');
     }
   };
@@ -154,7 +211,9 @@ function AppContent() {
             onLogout={handleLogout}
             onNavigate={(screen) => {
               if (screen === 'youthDashboard') {
-                setCurrentScreen('Bible');
+                setAdminYouthView(true);
+                setDrawerOpen(false);
+                setCurrentScreen('Home');
               }
             }}
           />
@@ -171,26 +230,38 @@ function AppContent() {
         );
 
       case 'Bible':
-        return (
-          <BibleScreen navigation={navigation} />
-        );
+        return <BibleScreen navigation={navigation} />;
 
       case 'Events':
-        return (
-          <EventsScreen navigation={navigation} />
-        );
+        return <EventsScreen navigation={navigation} />;
+
+      case 'Notifications':
+        return <NotificationsScreen navigation={navigation} />;
 
       case 'Journal':
         return (
-          <PrayerJournalScreen
+          <PrayerJournalScreen navigation={navigation} />
+        );
+
+      case 'Attendance':
+        return <AttendanceScreen navigation={navigation} />;
+
+      case 'Profile':
+        return (
+          <ProfileScreen
+            user={currentUser}
             navigation={navigation}
           />
         );
 
-      case 'Attendance':
+      case 'LinkMember':
         return (
-          <AttendanceScreen
-            navigation={navigation}
+          <LinkMemberScreen
+            onCancel={() => setCurrentScreen('Home')}
+            onLinked={(user) => {
+              setCurrentUser(user);
+              setCurrentScreen('Home');
+            }}
           />
         );
 
@@ -222,9 +293,17 @@ function AppContent() {
   // ==========================================
   const styles = createStyles(colors, isDarkMode);
 
+  // Play intro before showing Sign In.
+  if (showIntro) {
+    return (
+      <IntroScreen
+        onFinish={() => setShowIntro(false)}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      
       {/* ======================================
           SCREEN
       ====================================== */}
@@ -235,13 +314,105 @@ function AppContent() {
         ]}
       >
         {renderScreen()}
+
+        {adminYouthView && (
+          <View
+            pointerEvents="box-none"
+            style={{
+              position: 'absolute',
+              right: 12,
+              bottom: 34,
+              alignItems: 'flex-end',
+              zIndex: 999,
+              elevation: 999,
+            }}
+          >
+            {/* Admin preview indicator */}
+            <View
+              style={{
+                backgroundColor: '#102A43',
+                borderWidth: 1,
+                borderColor: '#2875F5',
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                borderRadius: 12,
+                marginBottom: 7,
+              }}
+            >
+              <Text
+                style={{
+                  color: '#93C5FD',
+                  fontSize: 10,
+                  fontWeight: '800',
+                  letterSpacing: 1,
+                }}
+              >
+                ADMIN VIEW
+              </Text>
+            </View>
+
+            {/* Compact return button */}
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Return to Admin Dashboard"
+              style={{
+                backgroundColor: '#075985',
+                paddingVertical: 10,
+                paddingHorizontal: 15,
+                borderRadius: 24,
+                flexDirection: 'row',
+                alignItems: 'center',
+                shadowColor: '#000',
+                shadowOpacity: 0.22,
+                shadowRadius: 5,
+                shadowOffset: {
+                  width: 0,
+                  height: 3,
+                },
+                elevation: 6,
+              }}
+              onPress={() => {
+                setAdminYouthView(false);
+                setDrawerOpen(false);
+                setCurrentScreen('AdminDashboard');
+              }}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={{
+                  color: '#FFFFFF',
+                  fontSize: 16,
+                  marginRight: 6,
+                }}
+              >
+                ⚙
+              </Text>
+
+              <Text
+                style={{
+                  color: '#FFFFFF',
+                  fontWeight: '800',
+                  fontSize: 13,
+                }}
+              >
+                Admin
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       {/* ======================================
           NORMAL USER SLIDE DRAWER
       ====================================== */}
-      {!isAuthScreen && !isAdminScreen && drawerOpen && (
-        <>
+      <Modal
+        visible={!isAuthScreen && !isAdminScreen && drawerOpen}
+        transparent
+        statusBarTranslucent
+        animationType="none"
+        onRequestClose={closeDrawer}
+      >
+        <View style={styles.drawerModalRoot}>
           <TouchableOpacity
             activeOpacity={1}
             style={styles.drawerBackdrop}
@@ -256,23 +427,43 @@ function AppContent() {
               },
             ]}
           >
-            {/* DRAWER HEADER */}
+            {/* PROFILE HEADER */}
             <View style={styles.drawerHeader}>
-              <View style={styles.drawerLogoCircle}>
-                <Text style={styles.drawerLogoLetter}>
-                  I
-                </Text>
-              </View>
+              <Pressable
+                style={{
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                }}
+                onPress={() => navigateFromDrawer('Profile')}
+                accessibilityRole="button"
+                accessibilityLabel="Open My Profile"
+              >
+                <View style={styles.drawerLogoCircle}>
+                  <Text style={styles.drawerLogoLetter}>
+                    {(currentUser?.name || 'U')
+                      .trim()
+                      .split(/\s+/)
+                      .slice(0, 2)
+                      .map((part) => part[0] || '')
+                      .join('')
+                      .toUpperCase()}
+                  </Text>
+                </View>
 
-              <View style={{ flex: 1 }}>
-                <Text style={styles.drawerTitle}>
-                  IKONEK
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={styles.drawerTitle}
+                    numberOfLines={1}
+                  >
+                    {currentUser?.name || 'My Profile'}
+                  </Text>
 
-                <Text style={styles.drawerSubtitle}>
-                  YOUTH CONNECT
-                </Text>
-              </View>
+                  <Text style={styles.drawerSubtitle}>
+                    {String(currentUser?.role || 'YOUTH').replace(/_/g, ' ')} · View Profile
+                  </Text>
+                </View>
+              </Pressable>
 
               <Pressable
                 style={styles.drawerClose}
@@ -306,6 +497,7 @@ function AppContent() {
               ['Events', 'calendar-outline'],
               ['Journal', 'journal-outline'],
               ['Attendance', 'clipboard-outline'],
+              ['LinkMember', 'link-outline'],
             ].map(([screen, icon]) => (
               <TouchableOpacity
                 key={screen}
@@ -314,9 +506,7 @@ function AppContent() {
                   currentScreen === screen &&
                     styles.drawerItemActive,
                 ]}
-                onPress={() =>
-                  navigateFromDrawer(screen)
-                }
+                onPress={() => navigateFromDrawer(screen)}
                 activeOpacity={0.8}
               >
                 <Text
@@ -334,7 +524,9 @@ function AppContent() {
                     ? '📅'
                     : icon === 'journal-outline'
                     ? '📓'
-                    : '📋'}
+                    : icon === 'clipboard-outline'
+                    ? '📋'
+                    : '🔗'}
                 </Text>
 
                 <Text
@@ -344,7 +536,9 @@ function AppContent() {
                       styles.drawerItemTextActive,
                   ]}
                 >
-                  {screen}
+                  {screen === 'LinkMember'
+                    ? 'Link My Account'
+                    : screen}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -365,8 +559,8 @@ function AppContent() {
               </TouchableOpacity>
             </View>
           </Animated.View>
-        </>
-      )}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -391,11 +585,15 @@ const createStyles = (colors, isDarkMode) =>
       backgroundColor: colors.bg,
     },
 
+    drawerModalRoot: {
+      flex: 1,
+      ...StyleSheet.absoluteFillObject,
+      flexDirection: 'row',
+    },
+
     drawerBackdrop: {
       ...StyleSheet.absoluteFillObject,
       backgroundColor: 'rgba(0, 0, 0, 0.48)',
-      zIndex: 20,
-      elevation: 10,
     },
 
     drawer: {
@@ -404,13 +602,13 @@ const createStyles = (colors, isDarkMode) =>
       bottom: 0,
       left: 0,
       width: '78%',
+      maxWidth: 360,
 
       backgroundColor: isDarkMode
         ? '#0B1A35'
         : '#FFFFFF',
 
       borderRightWidth: 1,
-
       borderRightColor: colors.border,
 
       paddingTop: 26,
@@ -438,12 +636,9 @@ const createStyles = (colors, isDarkMode) =>
       width: 48,
       height: 48,
       borderRadius: 16,
-
       backgroundColor: '#2875F5',
-
       alignItems: 'center',
       justifyContent: 'center',
-
       marginRight: 12,
     },
 
@@ -458,13 +653,14 @@ const createStyles = (colors, isDarkMode) =>
       fontSize: 18,
       fontWeight: '900',
       letterSpacing: 1,
+      flexShrink: 1,
+      minWidth: 0,
     },
 
     drawerSubtitle: {
       color: isDarkMode
         ? '#55A1FF'
         : '#2875F5',
-
       fontSize: 9,
       fontWeight: '800',
       letterSpacing: 1.2,
@@ -475,15 +671,11 @@ const createStyles = (colors, isDarkMode) =>
       width: 38,
       height: 38,
       borderRadius: 12,
-
       backgroundColor: colors.card,
-
       borderWidth: 1,
       borderColor: colors.border,
-
       alignItems: 'center',
       justifyContent: 'center',
-
       zIndex: 40,
       elevation: 40,
     },
@@ -504,10 +696,8 @@ const createStyles = (colors, isDarkMode) =>
     drawerItem: {
       flexDirection: 'row',
       alignItems: 'center',
-
       paddingVertical: 14,
       paddingHorizontal: 13,
-
       borderRadius: 14,
       marginBottom: 6,
     },
@@ -520,9 +710,7 @@ const createStyles = (colors, isDarkMode) =>
 
     drawerIcon: {
       width: 30,
-
       color: colors.muted,
-
       fontSize: 20,
       textAlign: 'center',
       marginRight: 10,
@@ -538,6 +726,8 @@ const createStyles = (colors, isDarkMode) =>
       color: colors.muted,
       fontSize: 15,
       fontWeight: '700',
+      flexShrink: 1,
+      minWidth: 0,
     },
 
     drawerItemTextActive: {
@@ -552,10 +742,8 @@ const createStyles = (colors, isDarkMode) =>
     drawerLogout: {
       flexDirection: 'row',
       alignItems: 'center',
-
       paddingVertical: 14,
       paddingHorizontal: 13,
-
       borderRadius: 14,
 
       backgroundColor: isDarkMode
@@ -571,9 +759,7 @@ const createStyles = (colors, isDarkMode) =>
 
     drawerLogoutIcon: {
       width: 30,
-
       color: '#FF6575',
-
       fontSize: 22,
       textAlign: 'center',
       marginRight: 10,

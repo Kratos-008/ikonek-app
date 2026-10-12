@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "iKonek",
+    "slug": "ikonek",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "userInterfaceStyle": "automatic",
+      "adaptiveIcon": {
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.ikonek.app",
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
+    },
+    "ios": {
+      "supportsTablet": true,
+      "userInterfaceStyle": "automatic"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      "expo-sqlite",
+      "expo-font",
+      "expo-secure-store",
+      "expo-video",
+      "expo-notifications"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "79ede572-6ce7-46a3-bb85-0a67ab24fb1e"
+      }
+    }
+  }
+}

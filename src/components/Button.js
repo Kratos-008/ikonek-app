@@ -1,4 +1,3 @@
-import React from 'react';
 import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { C } from '../constants/theme';
 

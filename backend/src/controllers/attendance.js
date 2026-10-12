@@ -45,7 +45,7 @@ const checkIn = async (req, res) => {
       where: { id: youthId },
     });
 
-    if (!youth) {
+    if (!youth || (req.user?.role === "LEADER" && String(youth.cellLeader || "").trim().toLowerCase() !== String(req.user.name || "").trim().toLowerCase())) {
       return res.status(404).json({
         success: false,
         message: "Youth profile not found",
@@ -60,6 +60,21 @@ const checkIn = async (req, res) => {
       });
     }
 
+    if (event.attendanceFinalized) {
+      return res.status(409).json({
+        success: false,
+        message: "Attendance for this event has been finalized and is locked.",
+      });
+    }
+
+    const normalizedStatus = String(status).toUpperCase();
+    if (!["PRESENT", "ABSENT"].includes(normalizedStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Status must be PRESENT or ABSENT.",
+      });
+    }
+
     // Attendance is only valid on the exact event date (Philippine time).
     const eventDateKey = getManilaDateKey(event.date);
     const todayKey = getManilaDateKey();
@@ -70,6 +85,7 @@ const checkIn = async (req, res) => {
       });
     }
 
+    const previousAttendance = await prisma.attendance.findUnique({ where: { youthId_dateKey: { youthId, dateKey } }, select: { status: true } });
     const attendance = await prisma.attendance.upsert({
       where: {
         youthId_dateKey: {
@@ -83,13 +99,13 @@ const checkIn = async (req, res) => {
         eventId: eventId || null,
         attendanceDate: dateFromKey(dateKey),
         dateKey,
-        status: String(status).toUpperCase(),
+        status: normalizedStatus,
       },
       update: {
         userId: req.user?.id || null,
         ...(eventId !== undefined ? { eventId: eventId || null } : {}),
         attendanceDate: dateFromKey(dateKey),
-        status: String(status).toUpperCase(),
+        status: normalizedStatus,
       },
       include: {
         youth: true,
@@ -97,6 +113,17 @@ const checkIn = async (req, res) => {
       },
     });
 
+    if (youth.userId && (!previousAttendance || previousAttendance.status !== normalizedStatus)) {
+      try {
+        await prisma.notification.create({ data: {
+          userId: youth.userId,
+          type: "ATTENDANCE_UPDATED",
+          title: "Attendance updated",
+          message: `Your attendance for ${event.title} was marked ${normalizedStatus.toLowerCase()}.`,
+          relatedId: event.id,
+        } });
+      } catch (notificationError) { console.error("Attendance notification error:", notificationError.message); }
+    }
     res.status(201).json({
       success: true,
       message: "Attendance recorded successfully",
@@ -124,6 +151,8 @@ const getAttendance = async (req, res) => {
       });
     }
 
+    // All authenticated users may read attendance records.
+    // Check-in and deletion permissions remain enforced separately.
     const attendance = await prisma.attendance.findMany({
       where: {
         ...(dateKey ? { dateKey } : {}),
@@ -159,10 +188,25 @@ const deleteAttendance = async (req, res) => {
 
     const existing = await prisma.attendance.findUnique({ where: { id } });
     if (!existing) {
-      return res.status(404).json({
-        success: false,
-        message: "Attendance record not found",
+      return res.status(404).json({ success: false, message: "Attendance record not found" });
+    }
+    if (existing.eventId) {
+      const relatedEvent = await prisma.event.findUnique({
+        where: { id: existing.eventId },
+        select: { attendanceFinalized: true },
       });
+      if (relatedEvent?.attendanceFinalized) {
+        return res.status(409).json({
+          success: false,
+          message: "Attendance for this event has been finalized and is locked.",
+        });
+      }
+    }
+    if (req.user?.role === "LEADER") {
+      const youth = await prisma.youthProfile.findUnique({ where: { id: existing.youthId }, select: { cellLeader: true } });
+      if (String(youth?.cellLeader || "").trim().toLowerCase() !== String(req.user.name || "").trim().toLowerCase()) {
+        return res.status(404).json({ success: false, message: "Attendance record not found" });
+      }
     }
 
     await prisma.attendance.delete({ where: { id } });
@@ -176,6 +220,118 @@ const deleteAttendance = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to remove attendance record",
+    });
+  }
+};
+
+// Finalize an event's attendance without deleting or overwriting existing records.
+// Leaders can finalize their assigned members; Admins can finalize the whole event.
+const finalizeAttendance = async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+
+    if (!event) {
+      return res.status(404).json({ success: false, message: "Event not found" });
+    }
+
+    if (event.attendanceFinalized) {
+      return res.status(409).json({
+        success: false,
+        message: "Attendance for this event has already been finalized.",
+      });
+    }
+
+    const eventDateKey = getManilaDateKey(event.date);
+    const todayKey = getManilaDateKey();
+    if (eventDateKey >= todayKey) {
+      return res.status(400).json({
+        success: false,
+        message: "Attendance can only be finalized after the event date has passed.",
+      });
+    }
+
+    const isAdmin = req.user?.role === "ADMIN";
+    const isLeader = req.user?.role === "LEADER";
+    if (!isAdmin && !isLeader) {
+      return res.status(403).json({ success: false, message: "Not authorized to finalize attendance" });
+    }
+
+    // Only registered attendees should receive automatic ABSENT records.
+    // Event.attendees stores names, so match names case-insensitively against
+    // existing youth profiles. Keep the Leader assignment restriction.
+    const registeredNames = new Set(
+      (Array.isArray(event.attendees) ? event.attendees : [])
+        .map((name) => String(name || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    const allYouthProfiles = await prisma.youthProfile.findMany({
+      select: { id: true, name: true, cellLeader: true },
+    });
+    const leaderName = String(req.user?.name || "").trim().toLowerCase();
+    const youthProfiles = allYouthProfiles.filter((youth) => {
+      const isRegistered = registeredNames.has(
+        String(youth.name || "").trim().toLowerCase()
+      );
+      const isAssignedToLeader =
+        !isLeader ||
+        String(youth.cellLeader || "").trim().toLowerCase() === leaderName;
+      return isRegistered && isAssignedToLeader;
+    });
+
+    // Preserve every existing record. Only create ABSENT records for unmarked
+    // registered attendees; skipDuplicates protects the youthId/dateKey unique constraint.
+    const absentRows = [];
+    for (const youth of youthProfiles) {
+      const existing = await prisma.attendance.findUnique({
+        where: {
+          youthId_dateKey: {
+            youthId: youth.id,
+            dateKey: eventDateKey,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        absentRows.push({
+          youthId: youth.id,
+          userId: req.user?.id || null,
+          eventId: event.id,
+          attendanceDate: dateFromKey(eventDateKey),
+          dateKey: eventDateKey,
+          status: "ABSENT",
+        });
+      }
+    }
+
+    const created = absentRows.length
+      ? await prisma.attendance.createMany({ data: absentRows, skipDuplicates: true })
+      : { count: 0 };
+
+    // Only an Admin can finalize the entire event. A Leader finalizes only
+    // their assigned members and leaves the event open for other leaders.
+    if (isAdmin) {
+      await prisma.event.update({
+        where: { id: event.id },
+        data: { attendanceFinalized: true },
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: isAdmin
+        ? "Event attendance finalized. Unmarked registered attendees were recorded as absent."
+        : "Your assigned registered attendees' attendance was finalized. Existing records were preserved.",
+      finalizedMembers: created.count,
+      eventFinalized: isAdmin,
+    });
+  } catch (error) {
+    console.error("Finalize attendance error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to finalize attendance",
     });
   }
 };
@@ -202,5 +358,6 @@ module.exports = {
   checkIn,
   getAttendance,
   deleteAttendance,
+  finalizeAttendance,
   clearAttendance,
 };

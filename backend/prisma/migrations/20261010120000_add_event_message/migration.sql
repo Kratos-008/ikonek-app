@@ -1,0 +1,1 @@
+-- Safely add a nullable welcome message to existing events.\n-- Existing events and attendance records are preserved.\nALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "message" TEXT;\n

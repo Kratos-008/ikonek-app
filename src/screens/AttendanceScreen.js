@@ -16,6 +16,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Print from 'expo-print';
 import { CameraView, Camera } from 'expo-camera';
 import QRCode from 'react-native-qrcode-svg';
+import qrcode from 'qrcode-generator';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
@@ -54,8 +55,12 @@ export default function AttendanceScreen({ navigation }) {
   const [activeEvent, setActiveEvent] = useState(null);
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [finalizingAttendance, setFinalizingAttendance] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isLeader, setIsLeader] = useState(false);
+  const [currentUserName, setCurrentUserName] = useState('');
+  const isManager = isAdmin || isLeader;
 
   // Modal States
   const [modalVisible, setModalVisible] = useState(false);
@@ -145,10 +150,14 @@ export default function AttendanceScreen({ navigation }) {
       try {
         const savedUser = await AsyncStorage.getItem('@ikonek_user');
         const user = savedUser ? JSON.parse(savedUser) : null;
-        setIsAdmin(String(user?.role || '').toUpperCase() === 'ADMIN');
+        const role = String(user?.role || '').toUpperCase();
+        setIsAdmin(role === 'ADMIN');
+        setIsLeader(role === 'LEADER');
+        setCurrentUserName(String(user?.name || user?.fullName || user?.username || '').trim());
       } catch (error) {
         console.error('Failed to load user role:', error);
         setIsAdmin(false);
+        setIsLeader(false);
       }
     })();
     loadYouthFromDatabase();
@@ -172,24 +181,24 @@ export default function AttendanceScreen({ navigation }) {
     return token;
   };
 
-  const getTodayDateKey = () => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+  const getManilaDateKey = (value = new Date()) => {
+    if (!value) return null;
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date(value));
+    const values = Object.fromEntries(
+      parts.map(({ type, value: partValue }) => [type, partValue])
+    );
+    return `${values.year}-${values.month}-${values.day}`;
   };
 
-  // Attendance is tied to the event scheduled for today's exact date.
-  const getEventDateKey = (dateValue) => {
-    if (!dateValue) return null;
-    const date = new Date(dateValue);
-    if (Number.isNaN(date.getTime())) return null;
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  };
+  const getTodayDateKey = () => getManilaDateKey(new Date());
+
+  // Attendance is tied to the event scheduled for today's exact Philippine date.
+  const getEventDateKey = (dateValue) => getManilaDateKey(dateValue);
 
   const getActiveEventFromList = (events = []) => {
     const todayKey = getTodayDateKey();
@@ -204,8 +213,14 @@ export default function AttendanceScreen({ navigation }) {
   const formatYouth = (item, records = [], currentEvent = null) => {
     const category = item.category || 'Newbie';
     const youthRecords = getPresentRecordsForYouth(records, item.id);
-    const count = youthRecords.length;
+    const recordedCount = youthRecords.length;
+    const manualTimerLevels = { 'First Timer': 1, 'Second Timer': 2, 'Third Timer': 3 };
     const isRegular = category === 'Regular';
+    // The saved category keeps a manually selected timer level across reloads.
+    // Legacy records still fall back to the number of historical PRESENT records.
+    const count = Object.prototype.hasOwnProperty.call(manualTimerLevels, category)
+      ? manualTimerLevels[category]
+      : recordedCount;
     const todayKey = getTodayDateKey();
     const todayRecord = currentEvent
       ? youthRecords.find(r => r.dateKey === todayKey && r.eventId === currentEvent.id)
@@ -221,7 +236,7 @@ export default function AttendanceScreen({ navigation }) {
       cellLeader: item.cellLeader || 'N/A',
       invitedBy: 'N/A',
       dateFilledOut: item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
-      status: isRegular ? 'Regular' : getNewbieStatusLabel(Math.min(4, count)),
+      status: isRegular ? 'Regular' : (manualTimerLevels[category] ? category : getNewbieStatusLabel(Math.min(4, count))),
       presentCountNumber: Math.min(4, count),
       presentCount: `${Math.min(4, count)} / 4`,
       isPresent: !!todayRecord,
@@ -314,6 +329,49 @@ export default function AttendanceScreen({ navigation }) {
     }
   };
 
+  const handleFinalizeAttendance = async (eventToFinalize) => {
+    if (!eventToFinalize || !isManager || finalizingAttendance) return;
+    const eventName = eventToFinalize.title || 'this event';
+    Alert.alert(
+      'Finalize Attendance',
+      isAdmin
+        ? `Finalize attendance for "${eventName}"? All remaining unmarked members will be recorded as Absent, and attendance edits will be locked.`
+        : `Finalize attendance for your assigned members for "${eventName}"? Existing attendance records will be preserved.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Finalize',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setFinalizingAttendance(true);
+              const token = await getAuthToken();
+              if (!token) return;
+              const response = await fetch(
+                `${API_URL}/api/attendance/events/${eventToFinalize.id}/finalize`,
+                {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                }
+              );
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.message || 'Unable to finalize attendance.');
+              Alert.alert('Attendance Finalized', data.message || 'Attendance was finalized successfully.');
+              await loadYouthFromDatabase();
+            } catch (error) {
+              Alert.alert('Finalization Error', error.message || 'Unable to finalize attendance.');
+            } finally {
+              setFinalizingAttendance(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // Attendance is now stored in Neon through /api/attendance. This remains only
   // as a compatibility no-op for the friend's UI handlers; it never writes local storage.
   const saveDataToStorage = async () => {};
@@ -370,7 +428,7 @@ export default function AttendanceScreen({ navigation }) {
 
   const handlePickFromGallery = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaType.Images,
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.5,
@@ -399,6 +457,58 @@ export default function AttendanceScreen({ navigation }) {
     return 'First Timer';
   };
 
+  // Manually set and persist a timer level immediately. This uses the existing
+  // YouthProfile category field, so no database migration is needed.
+  const persistTimerLevel = async (member, category, label) => {
+    try {
+      const token = await getAuthToken();
+      if (!token) throw new Error('Please sign in again and try once more.');
+      const response = await fetch(`${API_URL}/api/youth/${member.id}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: member.name,
+          gender: member.sex === 'N/A' ? null : member.sex,
+          age: Number(member.age) || null,
+          birthday: member.birthday === 'N/A' ? null : member.birthday,
+          address: member.address === 'N/A' ? null : member.address,
+          cellLeader: member.cellLeader || 'N/A',
+          category,
+          image: member.photo || null,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not update the timer level.');
+      await loadYouthFromDatabase();
+      Alert.alert('Timer Level Updated', `${member.name} is now ${label}.`);
+    } catch (error) {
+      console.error('Manual timer level update error:', error);
+      Alert.alert('Update Failed', error.message || 'Could not update the timer level.');
+    }
+  };
+
+  const handleSetTimerLevel = (member) => {
+    const moreLevels = () => Alert.alert(
+      'More Timer Levels',
+      `Choose the new level for ${member.name}. This changes their level immediately without creating or deleting attendance records.`,
+      [
+        { text: 'Third Timer', onPress: () => persistTimerLevel(member, 'Third Timer', 'Third Timer') },
+        { text: 'Fourth Timer (Regular)', onPress: () => persistTimerLevel(member, 'Regular', 'Fourth Timer / Regular Member') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+    Alert.alert(
+      'Set Timer Level',
+      `Choose the new level for ${member.name}. For Third or Fourth Timer, select More Levels.`,
+      [
+        { text: 'First Timer', onPress: () => persistTimerLevel(member, 'First Timer', 'First Timer') },
+        { text: 'Second Timer', onPress: () => persistTimerLevel(member, 'Second Timer', 'Second Timer') },
+        { text: 'More Levels…', onPress: moreLevels },
+      ]
+    );
+  };
+
+
   // TIMERS: each Present creates one persistent attendance record for today.
   const handleTogglePresentNewbie = async (id) => {
     if (!activeEvent) {
@@ -410,39 +520,39 @@ export default function AttendanceScreen({ navigation }) {
 
     try {
       await recordAttendance(id);
+      const newCount = Math.min(4, (member.presentCountNumber || 0) + 1);
+      const nextCategory = getNewbieStatusLabel(newCount);
+      const token = await getAuthToken();
+      if (!token) throw new Error('Attendance was saved, but your session expired before the timer level could update.');
 
-      const newCount = (member.presentCountNumber || 0) + 1;
-      if (newCount >= 4) {
-        const token = await getAuthToken();
-        if (!token) return;
-
-        const promotionResponse = await fetch(`${API_URL}/api/youth/${member.id}`, {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: member.name,
-            gender: member.sex === 'N/A' ? null : member.sex,
-            age: Number(member.age) || null,
-            birthday: member.birthday === 'N/A' ? null : member.birthday,
-            address: member.address === 'N/A' ? null : member.address,
-            cellLeader: member.cellLeader || 'N/A',
-            category: 'Regular',
-            image: member.photo || null,
-          }),
-        });
-        const promotionData = await promotionResponse.json();
-        if (!promotionResponse.ok) throw new Error(promotionData.message || 'Attendance was saved, but promotion failed.');
-      }
+      const levelResponse = await fetch(`${API_URL}/api/youth/${member.id}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: member.name,
+          gender: member.sex === 'N/A' ? null : member.sex,
+          age: Number(member.age) || null,
+          birthday: member.birthday === 'N/A' ? null : member.birthday,
+          address: member.address === 'N/A' ? null : member.address,
+          cellLeader: member.cellLeader || 'N/A',
+          category: nextCategory,
+          image: member.photo || null,
+        }),
+      });
+      const levelData = await levelResponse.json();
+      if (!levelResponse.ok) throw new Error(levelData.message || 'Attendance was saved, but the timer level could not update.');
 
       await loadYouthFromDatabase();
       if (newCount >= 4) {
-        Alert.alert("Congratulations! 🎉", `${member.name} has completed 4/4 attendance! Promoted to Regular Member.`);
+        Alert.alert('Congratulations! 🎉', `${member.name} has completed 4/4 attendance and is now a Regular Member.`);
       } else {
-        Alert.alert("Present ✅", `${member.name} is marked Present. ${Math.min(4, newCount)}/4 attendance completed.`);
+        Alert.alert('Present ✅', `${member.name} is marked Present. Timer level: ${nextCategory} (${newCount}/4).`);
       }
     } catch (error) {
       console.error('Record timer attendance error:', error);
       Alert.alert('Attendance Error', error.message || 'Unable to record attendance.');
+      // Refresh in case the attendance write succeeded but the level update failed.
+      await loadYouthFromDatabase();
     }
   };
 
@@ -542,7 +652,7 @@ export default function AttendanceScreen({ navigation }) {
   };
 
   const handleDelete = (id, isRegular) => {
-    if (!isAdmin) return;
+    if (!isManager) return;
     Alert.alert(
       "Delete Record",
       "Are you sure you want to delete this record?",
@@ -574,7 +684,7 @@ export default function AttendanceScreen({ navigation }) {
   };
 
   const handleOpenAdd = () => {
-    if (!isAdmin) return;
+    if (!isManager) return;
     setIsEditing(false);
     setEditId(null);
     setName('');
@@ -591,7 +701,7 @@ export default function AttendanceScreen({ navigation }) {
   };
 
   const handleOpenEdit = (item, isRegular) => {
-    if (!isAdmin) return;
+    if (!isManager) return;
     setIsEditing(true);
     setEditId(item.id);
     setName(item.name || '');
@@ -614,6 +724,73 @@ export default function AttendanceScreen({ navigation }) {
   // ====== LEADERS ======
   const normalizeName = (s) => String(s || '').trim().toLowerCase();
 
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+
+  const makeQrSvg = (value) => {
+    const qr = qrcode(0, 'M');
+    qr.addData(String(value));
+    qr.make();
+    return qr.createSvgTag(4, 2);
+  };
+
+  const handlePrintQrDirectory = async (members, title) => {
+    const eligible = (Array.isArray(members) ? members : [])
+      .filter(m => m && m.id != null && String(m.id).trim() !== '')
+      .slice()
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    if (!eligible.length) {
+      Alert.alert('No Members', 'There are no regular members with valid QR IDs to print.');
+      return;
+    }
+    try {
+      const cards = eligible.map(member => `
+        <article class="card">
+          <div class="qr">${makeQrSvg(member.id)}</div>
+          <div class="name">${escapeHtml(member.name || 'Unnamed Member')}</div>
+        </article>`).join('');
+      const html = `<!doctype html><html><head><meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>${escapeHtml(title)}</title><style>
+        @page { size: A4; margin: 10mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; color: #111827; margin: 0; }
+        h1 { font-size: 18pt; text-align: center; margin: 0 0 5mm; }
+        .meta { text-align: center; font-size: 9pt; color: #475569; margin-bottom: 6mm; }
+        .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5mm 4mm; }
+        .card { min-width: 0; min-height: 48mm; border: 1px solid #cbd5e1; border-radius: 3mm; padding: 3mm 2mm; display: flex; flex-direction: column; align-items: center; justify-content: center; break-inside: avoid; page-break-inside: avoid; }
+        .qr { width: 34mm; height: 34mm; display: flex; align-items: center; justify-content: center; }
+        .qr svg { width: 100%; height: 100%; }
+        .name { margin-top: 2mm; font-size: 9pt; font-weight: 700; text-align: center; overflow-wrap: anywhere; }
+        </style></head><body><h1>${escapeHtml(title)}</h1>
+        <div class="meta">${eligible.length} regular member${eligible.length === 1 ? '' : 's'} · Scan using the iKonek attendance scanner</div>
+        <main class="grid">${cards}</main></body></html>`;
+      await Print.printAsync({ html });
+    } catch (error) {
+      console.error('QR directory print error:', error);
+      Alert.alert('Print Error', 'Unable to create the QR directory. Please try again.');
+    }
+  };
+
+  const handlePrintAllRegularQr = () => {
+    if (!isAdmin) {
+      Alert.alert('Not Allowed', 'Only admins can print the directory for all regular members.');
+      return;
+    }
+    return handlePrintQrDirectory(regularList, 'iKonek Regular Members QR Directory');
+  };
+
+  const handlePrintLeaderQr = (leader) => {
+    if (isAdmin) return handlePrintQrDirectory(getLeaderMembers(leader), `${leader.name} - Cell Group QR Directory`);
+    if (!isLeader || !currentUserName || normalizeName(currentUserName) !== normalizeName(leader.name)) {
+      Alert.alert('Not Allowed', 'You can only print QR codes for your own cell group.');
+      return;
+    }
+    return handlePrintQrDirectory(getLeaderMembers(leader), `${leader.name} - Cell Group QR Directory`);
+  };
+
+
   const saveLeadersToStorage = async () => {};
 
   // Members ng leader = mga Regular na ang Cell Leader ay kapareho ng pangalan ng leader
@@ -626,6 +803,10 @@ export default function AttendanceScreen({ navigation }) {
   const sortedLeaders = [...leadersList]
     .filter(l => normalizeName(l.name).includes(normalizeName(leaderSearch)))
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  const finalizableEvent = [...eventsList]
+    .filter((event) => event?.date && getEventDateKey(event.date) === getTodayDateKey() && !event.attendanceFinalized)
+    .sort((a, b) => new Date(b.date) - new Date(a.date))[0] || null;
 
   const handleOpenAddLeader = () => {
     if (!isAdmin) return;
@@ -676,7 +857,7 @@ export default function AttendanceScreen({ navigation }) {
       l => l.id !== editLeaderId && normalizeName(l.name) === normalizeName(lName)
     );
     if (duplicate) {
-      Alert.alert("Duplicate", "May leader na may ganitong pangalan.");
+      Alert.alert("Duplicate", "A leader with the same name already exists.");
       return;
     }
 
@@ -716,23 +897,61 @@ export default function AttendanceScreen({ navigation }) {
 
   const handleDeleteLeader = (leader) => {
     if (!isAdmin) return;
-    const memberCount = getLeaderMembers(leader).length;
+
+    const assignedMembers = getLeaderMembers(leader);
+    const memberCount = assignedMembers.length;
+
     Alert.alert(
       "Delete Leader",
       memberCount > 0
-        ? `I-delete si ${leader.name}? Hindi made-delete ang ${memberCount} member(s) niya, mananatili sila sa Regular list.`
-        : `I-delete si ${leader.name}?`,
+        ? `Remove ${leader.name} from the Leaders list? ${memberCount} member(s) will remain in the Regular list, but their Cell Leader assignment will be cleared. Attendance history will be preserved.`
+        : `Remove ${leader.name} from the Leaders list?`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => {
-            const updated = leadersList.filter(l => l.id !== leader.id);
-            setLeadersList(updated);
-            saveLeadersToStorage(updated);
-          }
-        }
+          onPress: async () => {
+            try {
+              const token = await getAuthToken();
+              if (!token) return;
+
+              // Persist the removal by clearing only the assigned members' cellLeader field.
+              // Do not delete youth profiles or attendance records.
+              for (const member of assignedMembers) {
+                const response = await fetch(`${API_URL}/api/youth/${member.id}`, {
+                  method: "PUT",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ cellLeader: null }),
+                });
+
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                  throw new Error(data.message || `Could not clear the Cell Leader assignment for ${member.name}.`);
+                }
+              }
+
+              await loadYouthFromDatabase();
+              Alert.alert(
+                "Leader Removed",
+                memberCount > 0
+                  ? `${leader.name} was removed. The ${memberCount} member(s) remain in your records, and their attendance history is preserved.`
+                  : `${leader.name} was removed.`
+              );
+            } catch (error) {
+              console.error("Delete leader error:", error);
+              // Refresh from the database so the screen reflects what actually saved.
+              await loadYouthFromDatabase();
+              Alert.alert(
+                "Delete Failed",
+                error.message || "Could not remove this leader. Please check your connection and try again."
+              );
+            }
+          },
+        },
       ]
     );
   };
@@ -758,13 +977,13 @@ export default function AttendanceScreen({ navigation }) {
     });
 
     if (toAdd.length === 0) {
-      Alert.alert("Auto-add", "Walang bagong leader na maidadagdag.");
+      Alert.alert("Auto-add", "No new Leaders were added. All Cell Leaders are already in the Leaders list.");
       return;
     }
     const updated = [...toAdd, ...leadersList];
     setLeadersList(updated);
     saveLeadersToStorage(updated);
-    Alert.alert("Auto-add ✅", `${toAdd.length} leader(s) ang naidagdag. I-edit sila para mailagay ang personal data.`);
+    Alert.alert("Auto-add ✅", `${toAdd.length} leader(s) were added. Edit them to fill in personal data.`);
   };
 
   // Member form: kung galing sa Leaders screen, babalik doon pagkatapos mag-save/cancel
@@ -777,6 +996,7 @@ export default function AttendanceScreen({ navigation }) {
   };
 
   const handleOpenAddMemberForLeader = (leader) => {
+    if (!isManager) return;
     setLeadersModalVisible(false);
     handleOpenAdd();
     setFormForceRegular(true);
@@ -785,6 +1005,7 @@ export default function AttendanceScreen({ navigation }) {
   };
 
   const handleOpenEditMember = (member) => {
+    if (!isManager) return;
     setLeadersModalVisible(false);
     handleOpenEdit(member, true);
     setReturnToLeaders(true);
@@ -895,7 +1116,9 @@ export default function AttendanceScreen({ navigation }) {
       birthday: birthday.trim() || null,
       address: address.trim() || null,
       cellLeader: isAddingRegular ? (cellLeader.trim() || 'N/A') : 'N/A',
-      category: isAddingRegular ? 'Regular' : 'Newbie',
+      category: isAddingRegular
+        ? 'Regular'
+        : (isEditing ? (newbieList.find(member => member.id === editId)?.status || 'Newbie') : 'Newbie'),
       image: photo || null,
     };
 
@@ -1156,6 +1379,14 @@ export default function AttendanceScreen({ navigation }) {
           >
             <Text style={styles.iconBtnText}>🖨 Print</Text>
           </TouchableOpacity>
+          {isAdmin && (
+            <TouchableOpacity
+              style={[styles.iconActionBtn, { backgroundColor: '#0F766E', borderColor: '#0D9488' }]}
+              onPress={handlePrintAllRegularQr}
+            >
+              <Text style={[styles.iconBtnText, { color: '#FFF' }]}>▦ QR Directory</Text>
+            </TouchableOpacity>
+          )}
 
           {/* HISTORY BUTTON */}
           <TouchableOpacity
@@ -1184,8 +1415,22 @@ export default function AttendanceScreen({ navigation }) {
           </Text>
         </View>
 
+        {isManager && finalizableEvent && (
+          <TouchableOpacity
+            style={[styles.addYouthBtn, { backgroundColor: '#B45309', marginBottom: 12 }]}
+            onPress={() => handleFinalizeAttendance(finalizableEvent)}
+            disabled={finalizingAttendance}
+          >
+            <Text style={[styles.addYouthBtnText, { color: '#FFFFFF' }]}>
+              {finalizingAttendance
+                ? 'Finalizing Attendance...'
+                : `✓ Finalize: ${finalizableEvent.title}`}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* ADD NEW MEMBER BUTTON */}
-        {isAdmin && activeTab !== 'All' && (
+        {isManager && activeTab !== 'All' && (
           <TouchableOpacity
             style={styles.addYouthBtn}
             onPress={handleOpenAdd}
@@ -1378,7 +1623,15 @@ export default function AttendanceScreen({ navigation }) {
                 </View>
 
                 <View style={styles.actionRow}>
-                  {isAdmin && (
+                  {isManager && !isRegular && (
+                    <TouchableOpacity
+                      style={styles.editBtn}
+                      onPress={() => handleSetTimerLevel(item)}
+                    >
+                      <Text style={styles.btnText}>↗ Set Timer Level</Text>
+                    </TouchableOpacity>
+                  )}
+                  {isManager && (
                     <>
                       <TouchableOpacity
                         style={styles.deleteBtn}
@@ -1397,7 +1650,7 @@ export default function AttendanceScreen({ navigation }) {
                   )}
 
                   {/* BACK / UNDO: admin-only */}
-                  {isAdmin && !isRegular && item.isPresent && (
+                  {isManager && !isRegular && item.isPresent && (
                     <TouchableOpacity
                       style={styles.undoBtn}
                       onPress={() => handleUndoNewbiePresent(item)}
@@ -1406,7 +1659,7 @@ export default function AttendanceScreen({ navigation }) {
                     </TouchableOpacity>
                   )}
 
-                  {item.isPresent ? (
+                  {isManager && (item.isPresent ? (
                     <View style={[styles.presentBtn, styles.activePresentBtn]}>
                       <Text style={styles.btnText}>✅ Present</Text>
                     </View>
@@ -1424,7 +1677,7 @@ export default function AttendanceScreen({ navigation }) {
                     >
                       <Text style={styles.btnText}>{activeEvent ? 'Mark Present' : 'Attendance Closed'}</Text>
                     </TouchableOpacity>
-                  )}
+                  ))}
                 </View>
               </View>
             );
@@ -1472,14 +1725,29 @@ export default function AttendanceScreen({ navigation }) {
                   onChangeText={setName}
                 />
 
-                <Text style={[styles.inputLabel, { color: theme.textSub }]}>Sex</Text>
-                <TextInput
-                  style={[styles.inputField, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.textMain }]}
-                  placeholder="e.g. Male / Female"
-                  placeholderTextColor={theme.textSub}
-                  value={sex}
-                  onChangeText={setSex}
-                />
+                <Text style={[styles.inputLabel, { color: theme.textSub }]}>Gender</Text>
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                  {['Male', 'Female'].map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={{
+                        flex: 1,
+                        minHeight: 46,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: sex === option ? '#3B82F6' : theme.border,
+                        backgroundColor: sex === option ? '#3B82F6' : theme.inputBg,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      onPress={() => setSex(option)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: sex === option }}
+                    >
+                      <Text style={{ color: sex === option ? '#FFFFFF' : theme.textMain, fontWeight: '600' }}>{option}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
                 <Text style={[styles.inputLabel, { color: theme.textSub }]}>Age</Text>
                 <TextInput
@@ -1546,10 +1814,10 @@ export default function AttendanceScreen({ navigation }) {
 
                 <View style={styles.modalBtnRow}>
                   <TouchableOpacity
-                    style={[styles.modalCancelBtn, { backgroundColor: theme.border }]}
+                    style={[styles.modalCancelBtn, { backgroundColor: '#EF4444' }]}
                     onPress={closeMemberModal}
                   >
-                    <Text style={styles.modalCancelText}>Cancel</Text>
+                    <Text style={[styles.modalCancelText, { color: '#FFFFFF' }]}>Cancel</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSave}>
@@ -1741,11 +2009,27 @@ export default function AttendanceScreen({ navigation }) {
 
                 {/* PRINT LEADERS WITH MEMBERS */}
                 <TouchableOpacity
-                  style={[styles.historyPrintBtn, { backgroundColor: '#0369A1' }]}
+                  style={[styles.historyPrintBtn, { backgroundColor: '#0369A1', flex: isLeader ? 1 : undefined, alignItems: 'center', justifyContent: 'center' }]}
                   onPress={handlePrintLeaders}
                 >
                   <Text style={styles.historyPrintBtnText}>🖨 Print Leaders</Text>
                 </TouchableOpacity>
+
+                {isLeader && !isAdmin && (
+                  <TouchableOpacity
+                    style={[styles.historyPrintBtn, { backgroundColor: '#059669', flex: 1, alignItems: 'center', justifyContent: 'center' }]}
+                    onPress={() => {
+                      const ownLeader = leadersList.find(item => normalizeName(item.name) === normalizeName(currentUserName));
+                      if (!ownLeader) {
+                        Alert.alert('Leader Profile Not Found', 'Your leader profile was not found in the Leaders list. Please contact an admin.');
+                        return;
+                      }
+                      handleOpenAddMemberForLeader(ownLeader);
+                    }}
+                  >
+                    <Text style={styles.historyPrintBtnText}>＋ My Members</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <TextInput
@@ -1789,12 +2073,22 @@ export default function AttendanceScreen({ navigation }) {
                               </TouchableOpacity>
                             </>
                           )}
-                          <TouchableOpacity
-                            style={[styles.presentBtn, { backgroundColor: '#059669' }]}
-                            onPress={() => handleOpenAddMemberForLeader(leader)}
-                          >
-                            <Text style={styles.btnText}>+ Add Member</Text>
-                          </TouchableOpacity>
+                          {isAdmin && (
+                            <TouchableOpacity
+                              style={[styles.presentBtn, { backgroundColor: '#059669' }]}
+                              onPress={() => handleOpenAddMemberForLeader(leader)}
+                            >
+                              <Text style={styles.btnText}>+ Add Member</Text>
+                            </TouchableOpacity>
+                          )}
+                          {(isAdmin || (isLeader && currentUserName && normalizeName(currentUserName) === normalizeName(leader.name))) && (
+                            <TouchableOpacity
+                              style={[styles.smallBtn, { backgroundColor: '#0F766E' }]}
+                              onPress={() => handlePrintLeaderQr(leader)}
+                            >
+                              <Text style={styles.btnText}>▦ QR</Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
 
                         {/* OPEN / CLOSE para makita ang members */}
@@ -1820,7 +2114,7 @@ export default function AttendanceScreen({ navigation }) {
                                 </Text>
                                 <Text style={[styles.infoText, { color: theme.textSub }]}>{m.address}</Text>
                               </View>
-                              {isAdmin && (
+                              {isManager && (
                                 <View style={{ flexDirection: 'row', gap: 6 }}>
                                   <TouchableOpacity
                                     style={[styles.smallBtn, { backgroundColor: '#1E3A8A' }]}
@@ -1878,17 +2172,32 @@ export default function AttendanceScreen({ navigation }) {
                   onChangeText={setLName}
                 />
                 <Text style={[styles.infoText, { color: theme.textSub, marginBottom: 10 }]}>
-                  Tip: dapat kapareho ng nakasulat sa Cell Leader ng mga members para lumabas sila sa leader na ito.
+                  Tip: Must be same as the name in the member list for auto-adding members to this leader.
                 </Text>
 
-                <Text style={[styles.inputLabel, { color: theme.textSub }]}>Sex</Text>
-                <TextInput
-                  style={[styles.inputField, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.textMain }]}
-                  placeholder="e.g. Male / Female"
-                  placeholderTextColor={theme.textSub}
-                  value={lSex}
-                  onChangeText={setLSex}
-                />
+                <Text style={[styles.inputLabel, { color: theme.textSub }]}>Gender</Text>
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                  {['Male', 'Female'].map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={{
+                        flex: 1,
+                        minHeight: 46,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: lSex === option ? '#3B82F6' : theme.border,
+                        backgroundColor: lSex === option ? '#3B82F6' : theme.inputBg,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      onPress={() => setLSex(option)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: lSex === option }}
+                    >
+                      <Text style={{ color: lSex === option ? '#FFFFFF' : theme.textMain, fontWeight: '600' }}>{option}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
                 <Text style={[styles.inputLabel, { color: theme.textSub }]}>Age</Text>
                 <TextInput
@@ -1941,10 +2250,10 @@ export default function AttendanceScreen({ navigation }) {
 
                 <View style={styles.modalBtnRow}>
                   <TouchableOpacity
-                    style={[styles.modalCancelBtn, { backgroundColor: theme.border }]}
+                    style={[styles.modalCancelBtn, { backgroundColor: '#EF4444' }]}
                     onPress={handleCancelLeaderForm}
                   >
-                    <Text style={styles.modalCancelText}>Cancel</Text>
+                    <Text style={[styles.modalCancelText, { color: '#FFFFFF' }]}>Cancel</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSaveLeader}>

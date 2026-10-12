@@ -4,6 +4,7 @@ const router = express.Router();
 const {
   getEvents,
   getEventById,
+  signupForEvent,
   createEvent,
   updateEvent,
   deleteEvent,
@@ -11,19 +12,16 @@ const {
 
 const { authenticateToken, requireAdmin } = require("../middleware/auth");
 
-// Get all events
+// Event listing and details remain available as before.
 router.get("/", getEvents);
-
-// Get a specific event
 router.get("/:id", getEventById);
 
-// Create an event
+// Signed-up youth can sign themselves up; Leaders can register only their assigned youth.
+router.post("/:id/signup", authenticateToken, signupForEvent);
+
+// Event management remains Admin-only.
 router.post("/", authenticateToken, requireAdmin, createEvent);
-
-// Update an event
 router.put("/:id", authenticateToken, requireAdmin, updateEvent);
-
-// Delete an event
 router.delete("/:id", authenticateToken, requireAdmin, deleteEvent);
 
 module.exports = router;

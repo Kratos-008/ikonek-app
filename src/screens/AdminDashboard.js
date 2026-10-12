@@ -9,13 +9,15 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Share,
 } from 'react-native';
 import { Screen } from '../components/Screen';
 import { Button } from '../components/Button';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 
-const API_URL = 'https://ikonek-app.onrender.com'; // Replace with your backend API URL
+const API_URL = 'https://ikonek-app.onrender.com';
 
 export function AdminDashboard({
   user,
@@ -25,9 +27,45 @@ export function AdminDashboard({
   onNavigate,
 }) {
   const [tab, setTab] = useState('management');
+  const [announcementTitle, setAnnouncementTitle] = useState('');
+  const [announcementMessage, setAnnouncementMessage] = useState('');
+  const [announcementSending, setAnnouncementSending] = useState(false);
+
+  const sendAnnouncement = async () => {
+    const title = announcementTitle.trim();
+    const message = announcementMessage.trim();
+    if (!title || !message) { Alert.alert('Missing details', 'Enter both an announcement title and message.'); return; }
+    setAnnouncementSending(true);
+    try {
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      const response = await fetch(`${API_URL}/api/notifications/announcements`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ title, message }) });
+      const rawResponse = await response.text();
+
+console.log("HTTP Status:", response.status);
+console.log("Response URL:", response.url);
+console.log("Response Body:", rawResponse);
+
+let data;
+
+try {
+  data = JSON.parse(rawResponse);
+} catch (error) {
+  console.error("JSON Parse Error:", error);
+  throw new Error(
+    `Server returned invalid JSON (HTTP ${response.status}). Check the console output.`
+  );
+}
+      if (!response.ok || !data.success) throw new Error(data.message || 'Unable to send announcement.');
+      setAnnouncementTitle(''); setAnnouncementMessage('');
+      Alert.alert('Announcement sent', data.message || 'Your announcement has been sent.');
+    } catch (error) { Alert.alert('Could not send', error.message || 'Please try again.'); }
+    finally { setAnnouncementSending(false); }
+  };
+
+  const totalUsers = usersList?.length || 0;
 
   const { colors, isDarkMode } = useTheme();
-  const primary = isDarkMode ? '#38BDF8' : primary;
+  const primary = isDarkMode ? '#38BDF8' : '#0284C7';
   const styles = createStyles(colors, primary, isDarkMode);
 
 
@@ -44,6 +82,11 @@ export function AdminDashboard({
   const [address, setAddress] = useState('');
   const [cellLeader, setCellLeader] = useState('');
   const [statusCategory, setStatusCategory] = useState('Newbie');
+  const [accountRole, setAccountRole] = useState('YOUTH');
+  const [youthProfiles, setYouthProfiles] = useState([]);
+  const [youthLoading, setYouthLoading] = useState(false);
+  const [savingMember, setSavingMember] = useState(false);
+  const [codeActionId, setCodeActionId] = useState(null);
 
   // ==========================================
   // GENERIC USER FORM STATE
@@ -57,6 +100,7 @@ export function AdminDashboard({
   // ==========================================
 
   const [directoryFilter, setDirectoryFilter] = useState('All');
+  const [directorySearch, setDirectorySearch] = useState('');
 
   // ==========================================
   // PRAYER REQUEST STATE
@@ -79,6 +123,7 @@ export function AdminDashboard({
     setAddress('');
     setCellLeader('');
     setStatusCategory('Newbie');
+    setAccountRole(role === 'leader' ? 'LEADER' : 'YOUTH');
 
     setGenericName('');
     setGenericPassword('');
@@ -87,78 +132,207 @@ export function AdminDashboard({
   };
 
   // ==========================================
-  // SAVE USER DATA
+  // MEMBER API / SAVE USER DATA
   // ==========================================
 
-  const handleSave = () => {
-    if (addingRole === 'youth') {
-      if (!fullName.trim() || !age.trim()) {
-        Alert.alert(
-          'Missing Information',
-          'Pakilagay ang Complete Name at Age!'
-        );
-        return;
-      }
+  const loadYouthProfiles = useCallback(async () => {
+    try {
+      setYouthLoading(true);
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      if (!token) throw new Error('Session expired. Please sign in again.');
 
-      const newYouthData = {
-        id: Date.now().toString(),
-        name: fullName,
-        age: age,
-        sex: sex,
-        address: address,
-        cellLeader: cellLeader,
-        category: statusCategory,
+      const response = await fetch(`${API_URL}/api/youth`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not load members.');
+
+      setYouthProfiles((data.youth || []).map((member) => ({
+        ...member,
+        sex: member.gender || '',
         role: 'youth',
-        createdAt: new Date().toLocaleDateString(),
-      };
+      })));
+    } catch (error) {
+      console.error('Load youth profiles error:', error);
+      Alert.alert('Unable to Load Members', error.message || 'Please try again.');
+    } finally {
+      setYouthLoading(false);
+    }
+  }, []);
 
-      setUsersList([...usersList, newYouthData]);
+  useEffect(() => {
+    loadYouthProfiles();
+  }, [loadYouthProfiles]);
 
-      Alert.alert(
-        'Success',
-        `Matagumpay na naidagdag si ${fullName} bilang ${statusCategory}!`
-      );
-    } else {
-      if (!genericName.trim()) {
-        Alert.alert(
-          'Missing Information',
-          'Pakilagay ang Pangalan!'
-        );
+  const showRegistrationCode = async (registrationCode, memberName) => {
+    Alert.alert(
+      'Member Linking Code',
+      `Member: ${memberName}\n\n${registrationCode}\n\nGive this code directly to the intended member. It can only be used once.`,
+      [
+        { text: 'Done', style: 'cancel' },
+        {
+          text: 'Share / Copy Code',
+          onPress: async () => {
+            try {
+              await Share.share({
+                message: `iKonek member linking code for ${memberName}: ${registrationCode}\nEnter this code during iKonek registration.`,
+              });
+            } catch (error) {
+              console.error('Share linking code error:', error);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSave = async () => {
+    if (addingRole === 'youth' || addingRole === 'leader') {
+      if (!fullName.trim() || !age.trim()) {
+        Alert.alert('Missing Information', "Please enter the member's full name and age.");
         return;
       }
 
-      const newAccount = {
-        id: Date.now().toString(),
-        name: genericName,
-        password: genericPassword || '123456',
-        role: addingRole,
-      };
+      const numericAge = Number(age);
+      if (!Number.isInteger(numericAge) || numericAge < 1 || numericAge > 120) {
+        Alert.alert('Invalid Age', 'Please enter an age between 1 and 120.');
+        return;
+      }
 
-      setUsersList([...usersList, newAccount]);
+      try {
+        setSavingMember(true);
+        const token = await AsyncStorage.getItem('@ikonek_token');
+        if (!token) throw new Error('Session expired. Please sign in again.');
 
-      Alert.alert(
-        'Success',
-        `Matagumpay na naidagdag ang ${addingRole}: ${genericName}`
-      );
+        const response = await fetch(`${API_URL}/api/youth`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            name: fullName.trim(),
+            age: numericAge,
+            gender: sex,
+            address: address.trim() || null,
+            cellLeader: cellLeader.trim() || null,
+            category: statusCategory,
+            accountRole: addingRole === 'leader' ? 'LEADER' : accountRole,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Failed to create member.');
+
+        const member = {
+          ...data.youth,
+          sex: data.youth?.gender || sex,
+          role: 'youth',
+        };
+        setYouthProfiles((current) => [member, ...current]);
+        setModalVisible(false);
+        setFullName('');
+        setAge('');
+        setAddress('');
+        setCellLeader('');
+
+        if (data.registrationCode) {
+          showRegistrationCode(data.registrationCode, data.youth?.name || fullName.trim());
+        } else {
+          Alert.alert('Member Added', `${fullName.trim()} was added successfully.`);
+        }
+      } catch (error) {
+        console.error('Create member error:', error);
+        Alert.alert('Unable to Add Member', error.message || 'Please try again.');
+      } finally {
+        setSavingMember(false);
+      }
+      return;
     }
 
+    // Keep the existing admin-account form behavior separate from member records.
+    if (!genericName.trim()) {
+      Alert.alert('Missing Information', 'Please enter a name.');
+      return;
+    }
+    const newAccount = {
+      id: Date.now().toString(),
+      name: genericName.trim(),
+      password: genericPassword || '123456',
+      role: addingRole,
+    };
+    if (typeof setUsersList === 'function') setUsersList((current = []) => [...current, newAccount]);
+    Alert.alert('Notice', 'This form does not create a backend login account. Use the normal registration flow for account creation.');
     setModalVisible(false);
+  };
+
+  const issueRegistrationCode = async (member) => {
+    try {
+      setCodeActionId(member.id);
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      if (!token) throw new Error('Session expired. Please sign in again.');
+      const response = await fetch(`${API_URL}/api/youth/${member.id}/registration-code`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not issue a linking code.');
+      if (data.registrationCode) showRegistrationCode(data.registrationCode, member.name);
+    } catch (error) {
+      Alert.alert('Unable to Issue Code', error.message || 'Please try again.');
+    } finally {
+      setCodeActionId(null);
+    }
+  };
+
+  const updateMemberRole = async (member) => {
+    const nextRole = member.accountRole === 'LEADER' ? 'YOUTH' : 'LEADER';
+    try {
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      if (!token) throw new Error('Session expired. Please sign in again.');
+      const response = await fetch(`${API_URL}/api/youth/${member.id}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ accountRole: nextRole }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not update member role.');
+      setYouthProfiles((current) => current.map((item) => item.id === member.id ? { ...item, accountRole: nextRole } : item));
+      Alert.alert('Role Updated', `${member.name} is now marked as ${nextRole === 'LEADER' ? 'Leader' : 'Youth'}.`);
+    } catch (error) {
+      Alert.alert('Unable to Update Role', error.message || 'Please try again.');
+    }
   };
 
   // ==========================================
   // YOUTH DIRECTORY
   // ==========================================
 
-  const youthList = usersList.filter(
-    (item) => item.role === 'youth'
-  );
+  const youthList = youthProfiles;
 
   const filteredYouth = youthList.filter((item) => {
-    if (directoryFilter === 'All') {
-      return true;
+    const category = String(item.category || '').trim();
+    if (directoryFilter !== 'All' && category !== directoryFilter) {
+      return false;
     }
 
-    return item.category === directoryFilter;
+    const query = directorySearch.trim().toLowerCase();
+    if (!query) return true;
+
+    const searchable = [
+      item.name,
+      item.age,
+      item.address,
+      item.cellLeader,
+      item.category,
+      item.accountRole,
+    ].map((value) => String(value || '')).join(' ').toLowerCase();
+
+    return searchable.includes(query);
   });
 
   // ==========================================
@@ -678,6 +852,7 @@ export function AdminDashboard({
 
   return (
     <Screen>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'right', 'bottom', 'left']}>
       {/* =====================================
           BACK BUTTON
       ====================================== */}
@@ -699,6 +874,16 @@ export function AdminDashboard({
       <Text style={styles.sub}>
         Logged in as: {user?.name} ({user?.role})
       </Text>
+
+      <View style={{ marginHorizontal: 16, marginTop: 14, marginBottom: 12, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: colors?.border || '#CBD5E1', backgroundColor: colors?.card || (isDarkMode ? '#111827' : '#FFFFFF') }}>
+        <Text style={{ color: colors?.text || (isDarkMode ? '#F8FAFC' : '#0F172A'), fontSize: 16, fontWeight: '700', marginBottom: 6 }}>Church Announcement</Text>
+        <Text style={{ color: colors?.muted || (isDarkMode ? '#94A3B8' : '#64748B'), marginBottom: 10 }}>Send a message to all linked youth and leader accounts.</Text>
+        <TextInput value={announcementTitle} onChangeText={setAnnouncementTitle} placeholder="Announcement title" placeholderTextColor={isDarkMode ? '#94A3B8' : '#64748B'} style={{ color: colors?.text || (isDarkMode ? '#F8FAFC' : '#0F172A'), borderWidth: 1, borderColor: colors?.border || '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, marginBottom: 8 }} />
+        <TextInput value={announcementMessage} onChangeText={setAnnouncementMessage} placeholder="Write the church announcement..." placeholderTextColor={isDarkMode ? '#94A3B8' : '#64748B'} multiline textAlignVertical="top" style={{ color: colors?.text || (isDarkMode ? '#F8FAFC' : '#0F172A'), minHeight: 76, borderWidth: 1, borderColor: colors?.border || '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9, marginBottom: 10 }} />
+        <TouchableOpacity disabled={announcementSending} onPress={sendAnnouncement} style={{ backgroundColor: announcementSending ? '#64748B' : primary, padding: 11, borderRadius: 8, alignItems: 'center' }}>
+          {announcementSending ? <ActivityIndicator color="#FFFFFF" /> : <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Send Announcement</Text>}
+        </TouchableOpacity>
+      </View>
 
       {/* =====================================
           NAVIGATION TABS
@@ -867,6 +1052,22 @@ export function AdminDashboard({
           <Text style={styles.sectionTitle}>
             📋 Youth Directory ({youthList.length})
           </Text>
+          <TouchableOpacity style={styles.actionBtn} onPress={loadYouthProfiles} activeOpacity={0.8}>
+            <Text style={styles.actionBtnText}>{youthLoading ? 'Loading members…' : '↻ Refresh Members'}</Text>
+          </TouchableOpacity>
+
+          {/* ONE SEARCH FIELD FOR ALL MEMBERS */}
+
+          <TextInput
+            value={directorySearch}
+            onChangeText={setDirectorySearch}
+            placeholder="Search all members by name or details..."
+            placeholderTextColor={colors.muted}
+            style={styles.directorySearchInput}
+            autoCapitalize="none"
+            returnKeyType="search"
+            accessibilityLabel="Search all youth directory members"
+          />
 
           {/* FILTERS */}
 
@@ -903,7 +1104,7 @@ export function AdminDashboard({
 
           {filteredYouth.length === 0 ? (
             <Text style={styles.emptyText}>
-              Walang nahanap na record para sa{' '}
+              Records not found for{' '}
               {directoryFilter}.
             </Text>
           ) : (
@@ -949,12 +1150,19 @@ export function AdminDashboard({
                   {item.address || 'N/A'}
                 </Text>
 
-                <Text
-                  style={styles.userDetail}
-                >
-                  Cell Leader:{' '}
-                  {item.cellLeader || 'N/A'}
-                </Text>
+                <Text style={styles.userDetail}>Cell Leader: {item.cellLeader || 'N/A'}</Text>
+                <Text style={styles.userDetail}>Approved role: {item.accountRole === 'LEADER' ? 'Leader' : 'Youth'}</Text>
+                <View style={styles.memberActionRow}>
+                  <TouchableOpacity style={styles.memberActionButton} onPress={() => updateMemberRole(item)} activeOpacity={0.8}>
+                    <Text style={styles.memberActionText}>{item.accountRole === 'LEADER' ? 'Set as Youth' : 'Set as Leader'}</Text>
+                  </TouchableOpacity>
+                  {!item.userId && (
+                    <TouchableOpacity style={styles.memberActionButton} onPress={() => issueRegistrationCode(item)} disabled={codeActionId === item.id} activeOpacity={0.8}>
+                      <Text style={styles.memberActionText}>{codeActionId === item.id ? 'Generating…' : 'Get Linking Code'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <Text style={styles.userDetail}>{item.userId ? 'Account linked' : 'No account linked yet'}</Text>
               </View>
             ))
           )}
@@ -1055,10 +1263,10 @@ export function AdminDashboard({
               >
                 {addingRole === 'youth'
                   ? '📝 Add Youth Data'
-                  : `Add New ${addingRole.toUpperCase()}`}
+                  : addingRole === 'leader' ? '🧑‍🏫 Add Youth Leader' : `Add New ${addingRole.toUpperCase()}`}
               </Text>
 
-              {addingRole === 'youth' ? (
+              {addingRole === 'youth' || addingRole === 'leader' ? (
                 <>
                   <Text
                     style={styles.inputLabel}
@@ -1201,6 +1409,22 @@ export function AdminDashboard({
                     }
                   />
 
+                  {addingRole !== 'leader' && <Text style={styles.inputLabel}>Account Role (approved by Admin)</Text>}
+                  {addingRole !== 'leader' && <View style={styles.categoryRow}>
+                    <TouchableOpacity
+                      style={[styles.catBtn, accountRole === 'YOUTH' && styles.catBtnRegularActive]}
+                      onPress={() => setAccountRole('YOUTH')}
+                    >
+                      <Text style={accountRole === 'YOUTH' ? styles.catTextActive : styles.catText}>Youth</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.catBtn, accountRole === 'LEADER' && styles.catBtnRegularActive]}
+                      onPress={() => setAccountRole('LEADER')}
+                    >
+                      <Text style={accountRole === 'LEADER' ? styles.catTextActive : styles.catText}>Leader</Text>
+                    </TouchableOpacity>
+                  </View>}
+
                   <Text
                     style={styles.inputLabel}
                   >
@@ -1306,12 +1530,13 @@ export function AdminDashboard({
                 <TouchableOpacity
                   style={styles.saveBtn}
                   onPress={handleSave}
+                  disabled={savingMember}
                   activeOpacity={0.8}
                 >
                   <Text
                     style={styles.btnText}
                   >
-                    Save Data
+                    {savingMember ? 'Saving…' : 'Save Data'}
                   </Text>
                 </TouchableOpacity>
 
@@ -1333,6 +1558,7 @@ export function AdminDashboard({
           </ScrollView>
         </View>
       </Modal>
+      </SafeAreaView>
     </Screen>
   );
 }
@@ -1342,6 +1568,10 @@ export function AdminDashboard({
 // =====================================================
 
 const createStyles = (colors, primary, isDarkMode) => StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+
   // ==========================================
   // GENERAL
   // ==========================================
@@ -1898,6 +2128,24 @@ const createStyles = (colors, primary, isDarkMode) => StyleSheet.create({
     fontWeight: 'bold',
   },
 
+  memberActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  memberActionButton: {
+    borderWidth: 1,
+    borderColor: colors.primary || primary,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  memberActionText: {
+    color: primary,
+    fontWeight: '600',
+    fontSize: 12,
+  },
   modalButtons: {
     flexDirection: 'row',
     gap: 10,
@@ -1924,4 +2172,16 @@ const createStyles = (colors, primary, isDarkMode) => StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: 'bold',
   },
+    directorySearchInput: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      color: colors.text,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginTop: 6,
+      marginBottom: 4,
+      fontSize: 14,
+    },
 });

@@ -9,6 +9,7 @@ const youthRoutes = require("./routes/youth");
 const eventRoutes = require("./routes/events");
 const attendanceRoutes = require("./routes/attendance");
 const prayerRoutes = require("./routes/prayer");
+const notificationRoutes = require("./routes/notifications");
 
 const app = express();
 
@@ -28,6 +29,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/youth", youthRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/attendance", attendanceRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.use((req, res, next) => {
   console.log("REQUEST:", req.method, req.originalUrl);

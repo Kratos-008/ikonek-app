@@ -5,20 +5,23 @@ const {
   checkIn,
   getAttendance,
   deleteAttendance,
+  finalizeAttendance,
   clearAttendance,
 } = require("../controllers/attendance");
 
 const {
   authenticateToken,
   requireAdmin,
+  requireLeaderOrAdmin,
 } = require("../middleware/auth");
 
-// Logged-in users can view attendance history.
+// Attendance history is scoped by the controller: Admin all, Leader assigned members, Youth own profile.
 router.get("/", authenticateToken, getAttendance);
 
-// Admins can record/undo/clear attendance from the attendance screen.
-router.post("/check-in", authenticateToken, requireAdmin, checkIn);
-router.delete("/:id", authenticateToken, requireAdmin, deleteAttendance);
+// Leaders can record/undo attendance for assigned members; only Admins can clear all history.
+router.post("/check-in", authenticateToken, requireLeaderOrAdmin, checkIn);
+router.post("/events/:eventId/finalize", authenticateToken, requireLeaderOrAdmin, finalizeAttendance);
 router.delete("/clear/all", authenticateToken, requireAdmin, clearAttendance);
+router.delete("/:id", authenticateToken, requireLeaderOrAdmin, deleteAttendance);
 
 module.exports = router;

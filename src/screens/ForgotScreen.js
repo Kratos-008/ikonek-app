@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   View,
@@ -12,9 +12,10 @@ import {
 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useTheme } from '../context/ThemeContext';
+
+const API_URL = 'https://ikonek-app.onrender.com';
 
 export default function ForgotPasswordScreen({ onNavigateToSignIn }) {
   const { isDarkMode, colors } = useTheme();
@@ -22,7 +23,6 @@ export default function ForgotPasswordScreen({ onNavigateToSignIn }) {
   const [email, setEmail] = useState('');
   const [step, setStep] = useState(1);
   const [otpCode, setOtpCode] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -37,146 +37,162 @@ export default function ForgotPasswordScreen({ onNavigateToSignIn }) {
     border: colors.border,
     primary: colors.primary || '#2563EB',
     buttonText: colors.buttonText,
-    codeBackground: isDarkMode ? '#1E293B' : '#EFF6FF',
-    codeBorder: isDarkMode ? '#3B82F6' : '#93C5FD',
-    codeNumber: isDarkMode ? '#38BDF8' : '#2563EB',
     icon: colors.muted,
   };
 
   const styles = createStyles(theme);
 
+  const [loading, setLoading] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return undefined;
+    const timer = setInterval(() => {
+      setCooldownSeconds((current) => Math.max(0, current - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldownSeconds > 0]);
+
+  const formatCountdown = (totalSeconds) => {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  };
+
   const handleSendResetCode = async () => {
     const cleanEmail = email.trim().toLowerCase();
-
-    // Correct email validation regex
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
     if (!emailRegex.test(cleanEmail)) {
       Alert.alert('Error', 'Please enter a valid email address.');
       return;
     }
-
+    if (loading) return;
     try {
-      const storedData = await AsyncStorage.getItem('@ikonek_users');
-
-      const users = storedData ? JSON.parse(storedData) : [];
-
-      const userExists = users.some(
-        (u) => u.email?.toLowerCase() === cleanEmail
-      );
-
-      if (!userExists) {
-        Alert.alert(
-          'Error',
-          'No account found with this email address.'
-        );
+      setLoading(true);
+      const response = await fetch(`${API_URL}/api/auth/request-password-reset`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        Alert.alert('Error', data?.message || 'Unable to request password recovery. Please try again.');
         return;
       }
-
-      // Generate 6-digit code
-      const code = Math.floor(
-        100000 + Math.random() * 900000
-      ).toString();
-
-      setGeneratedOtp(code);
+      setEmail(cleanEmail);
       setStep(2);
-
-      Alert.alert(
-        'Verification Code Sent',
-        `Verification code sent to ${cleanEmail}.\n\nYour Code is: ${code}`
+      setOtpCode('');
+      setCooldownSeconds(
+        Number.isFinite(Number(data?.retryAfterSeconds))
+          ? Math.max(0, Number(data.retryAfterSeconds))
+          : 600
       );
-    } catch (e) {
-      console.error('Send reset code error:', e);
-
-      Alert.alert(
-        'Error',
-        'An error occurred while checking account.'
-      );
+      Alert.alert('Check your email', data?.message || 'If an account exists for this email, a recovery code has been sent.');
+    } catch (error) {
+      console.error('Request password reset error:', error);
+      Alert.alert('Connection Error', 'Unable to connect to iKonek. Please check your internet connection and try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleVerifyCode = () => {
-    if (otpCode.trim() === generatedOtp) {
-      setStep(3);
-    } else {
-      Alert.alert(
-        'Error',
-        'Invalid 6-digit verification code.'
+  const handleResendResetCode = async () => {
+    if (loading || cooldownSeconds > 0) return;
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/api/auth/request-password-reset`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (Number(data?.retryAfterSeconds) > 0) {
+          setCooldownSeconds(Number(data.retryAfterSeconds));
+        }
+        Alert.alert('Unable to resend code', data?.message || 'Please wait before requesting another code.');
+        return;
+      }
+      setOtpCode('');
+      setCooldownSeconds(
+        Number.isFinite(Number(data?.retryAfterSeconds))
+          ? Math.max(0, Number(data.retryAfterSeconds))
+          : 600
       );
+      Alert.alert('Recovery code requested', data?.message || 'If an account exists for this email, a new recovery code has been sent.');
+    } catch (error) {
+      console.error('Resend password reset code error:', error);
+      Alert.alert('Connection Error', 'Unable to connect to iKonek. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyCode = async () => {
+    const cleanCode = otpCode.trim();
+    if (!/^\d{6}$/.test(cleanCode)) {
+      Alert.alert('Error', 'Enter the 6-digit code sent to your email.');
+      return;
+    }
+    if (loading) return;
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/api/auth/verify-password-reset`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code: cleanCode }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        Alert.alert('Error', data?.message || 'The code is invalid or expired.');
+        return;
+      }
+      setStep(3);
+    } catch (error) {
+      console.error('Verify password reset code error:', error);
+      Alert.alert('Connection Error', 'Unable to connect to iKonek. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleResetPassword = async () => {
-    if (!newPassword.trim()) {
-      Alert.alert(
-        'Error',
-        'Please enter a new password.'
-      );
+    if (newPassword.length < 8) {
+      Alert.alert('Error', 'Your new password must be at least 8 characters long.');
       return;
     }
-
-    if (
-      newPassword.trim() !==
-      confirmNewPassword.trim()
-    ) {
-      Alert.alert(
-        'Error',
-        'Passwords do not match.'
-      );
+    if (newPassword !== confirmNewPassword) {
+      Alert.alert('Error', 'Passwords do not match.');
       return;
     }
-
+    if (loading) return;
     try {
-      const storedData = await AsyncStorage.getItem(
-        '@ikonek_users'
-      );
-
-      let users = storedData
-        ? JSON.parse(storedData)
-        : [];
-
-      const cleanEmail = email.trim().toLowerCase();
-
-      users = users.map((u) => {
-        if (u.email?.toLowerCase() === cleanEmail) {
-          return {
-            ...u,
-            password: newPassword.trim(),
-          };
-        }
-
-        return u;
+      setLoading(true);
+      const response = await fetch(`${API_URL}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          code: otpCode.trim(),
+          newPassword,
+        }),
       });
-
-      await AsyncStorage.setItem(
-        '@ikonek_users',
-        JSON.stringify(users)
-      );
-
-      Alert.alert(
-        'Success',
-        'Password successfully reset!',
-        [
-          {
-            text: 'Sign In Now',
-            onPress: () => {
-              if (
-                typeof onNavigateToSignIn ===
-                'function'
-              ) {
-                onNavigateToSignIn();
-              }
-            },
-          },
-        ]
-      );
-    } catch (e) {
-      console.error('Reset password error:', e);
-
-      Alert.alert(
-        'Error',
-        'Failed to update password.'
-      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        Alert.alert('Error', data?.message || 'Unable to reset password. Please request a new recovery code.');
+        return;
+      }
+      Alert.alert('Password Updated', 'Your password has been updated. You can now sign in with your new password.', [
+        { text: 'Sign In', onPress: () => {
+          if (typeof onNavigateToSignIn === 'function') onNavigateToSignIn();
+        }},
+      ]);
+    } catch (error) {
+      console.error('Reset password error:', error);
+      Alert.alert('Connection Error', 'Unable to connect to iKonek. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -222,7 +238,7 @@ export default function ForgotPasswordScreen({ onNavigateToSignIn }) {
               activeOpacity={0.8}
             >
               <Text style={styles.btnText}>
-                Send Verification Code
+                {loading ? 'Sending...' : 'Send Verification Code'}
               </Text>
             </TouchableOpacity>
           </>
@@ -233,16 +249,6 @@ export default function ForgotPasswordScreen({ onNavigateToSignIn }) {
             <Text style={styles.subtitle}>
               Enter the 6-digit code sent to {email}
             </Text>
-
-            <View style={styles.codeBanner}>
-              <Text style={styles.codeBannerLabel}>
-                Your Verification Code:
-              </Text>
-
-              <Text style={styles.codeBannerNumber}>
-                {generatedOtp}
-              </Text>
-            </View>
 
             <TextInput
               style={styles.input}
@@ -262,7 +268,26 @@ export default function ForgotPasswordScreen({ onNavigateToSignIn }) {
               activeOpacity={0.8}
             >
               <Text style={styles.btnText}>
-                Verify Code
+                {loading ? 'Verifying...' : 'Verify Code'}
+              </Text>
+            </TouchableOpacity>
+
+            <Text style={styles.subtitle}>
+              {cooldownSeconds > 0
+                ? `You can request a new recovery code in ${formatCountdown(cooldownSeconds)}.`
+                : 'You can request a new recovery code now.'}
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.primaryBtn, cooldownSeconds > 0 && { opacity: 0.45 }]}
+              onPress={handleResendResetCode}
+              disabled={loading || cooldownSeconds > 0}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.btnText}>
+                {loading ? 'Sending...' : cooldownSeconds > 0
+                  ? `Resend Code (${formatCountdown(cooldownSeconds)})`
+                  : 'Resend Verification Code'}
               </Text>
             </TouchableOpacity>
           </>
@@ -328,7 +353,7 @@ export default function ForgotPasswordScreen({ onNavigateToSignIn }) {
               activeOpacity={0.8}
             >
               <Text style={styles.btnText}>
-                Reset Password
+                {loading ? 'Updating...' : 'Reset Password'}
               </Text>
             </TouchableOpacity>
           </>
@@ -447,28 +472,5 @@ const createStyles = (theme) =>
       color: theme.secondaryText,
       fontSize: 14,
       marginLeft: 2,
-    },
-
-    codeBanner: {
-      backgroundColor: theme.codeBackground,
-      padding: 16,
-      borderRadius: 8,
-      alignItems: 'center',
-      marginBottom: 16,
-      borderWidth: 1,
-      borderColor: theme.codeBorder,
-    },
-
-    codeBannerLabel: {
-      color: theme.secondaryText,
-      fontSize: 12,
-      marginBottom: 4,
-    },
-
-    codeBannerNumber: {
-      color: theme.codeNumber,
-      fontSize: 28,
-      fontWeight: 'bold',
-      letterSpacing: 4,
     },
   });

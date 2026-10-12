@@ -2,355 +2,221 @@ const prisma = require("../lib/prisma");
 const fs = require("fs");
 const path = require("path");
 
-// Get the physical path of an uploaded prayer image
+const VALID_POST_TYPES = new Set(["DEVOTION", "PRAYER_REQUEST"]);
+const VALID_VISIBILITIES = new Set(["PRIVATE", "CHURCH"]);
+const VALID_STATUSES = new Set(["PENDING", "ANSWERED"]);
+
 const getImagePath = (imageUrl) => {
-  if (!imageUrl || typeof imageUrl !== "string") {
-    return null;
-  }
-
-  const filename = path.basename(imageUrl);
-
-  return path.join(__dirname, "../uploads/prayer", filename);
+  if (!imageUrl || typeof imageUrl !== "string") return null;
+  return path.join(__dirname, "../uploads/prayer", path.basename(imageUrl));
 };
 
-// Delete a physical prayer image if it exists
 const deleteImageFile = (imageUrl) => {
   try {
     const imagePath = getImagePath(imageUrl);
-
-    if (imagePath && fs.existsSync(imagePath)) {
-      fs.unlinkSync(imagePath);
-    }
+    if (imagePath && fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
   } catch (error) {
     console.error("Delete prayer image error:", error);
   }
 };
 
+const cleanupUploadedFile = (req) => {
+  if (!req.file) return;
+  try {
+    const uploadedPath = path.join(__dirname, "../uploads/prayer", req.file.filename);
+    if (fs.existsSync(uploadedPath)) fs.unlinkSync(uploadedPath);
+  } catch (error) {
+    console.error("Cleanup uploaded image error:", error);
+  }
+};
 
-// Submit a prayer request
+const cleanOptionalString = (value) => {
+  if (value === undefined || value === null) return null;
+  return String(value).trim() || null;
+};
+
 const createPrayerRequest = async (req, res) => {
   try {
-    const {
-      senderName,
-      devotionTitle,
-      biblePassage,
-      content,
-    } = req.body;
+    const postType = String(req.body.postType || "PRAYER_REQUEST").toUpperCase();
+    const visibility = String(req.body.visibility || "PRIVATE").toUpperCase();
+    const content = typeof req.body.content === "string" ? req.body.content.trim() : "";
 
-    if (!content || !content.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Prayer request is required",
-      });
+    if (!VALID_POST_TYPES.has(postType)) {
+      cleanupUploadedFile(req);
+      return res.status(400).json({ success: false, message: "Invalid journal post type" });
+    }
+    if (!VALID_VISIBILITIES.has(visibility)) {
+      cleanupUploadedFile(req);
+      return res.status(400).json({ success: false, message: "Invalid post visibility" });
+    }
+    if (!content) {
+      cleanupUploadedFile(req);
+      return res.status(400).json({ success: false, message: postType === "DEVOTION" ? "Reflection is required" : "Prayer request is required" });
     }
 
-    // If an image was uploaded, create its public URL
-    const imageUrl = req.file
-      ? `/uploads/prayer/${req.file.filename}`
-      : null;
-
+    const imageUrl = req.file ? `/uploads/prayer/${req.file.filename}` : null;
+    const author = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { name: true },
+    });
     const prayerRequest = await prisma.prayerRequest.create({
       data: {
-        user: {
-  connect: {
-    id: req.user.userId,
-  },
-},
-
-        senderName:
-          senderName !== undefined && senderName !== null
-            ? senderName.trim()
-            : null,
-
-        devotionTitle:
-          devotionTitle !== undefined && devotionTitle !== null
-            ? devotionTitle.trim()
-            : null,
-
-        biblePassage:
-          biblePassage !== undefined && biblePassage !== null
-            ? biblePassage.trim()
-            : null,
-
-        content: content.trim(),
-
+        userId: req.user.userId,
+        // Use the authenticated account name rather than trusting client-supplied text.
+        senderName: author?.name || null,
+        devotionTitle: cleanOptionalString(req.body.devotionTitle),
+        biblePassage: cleanOptionalString(req.body.biblePassage),
+        content,
         imageUrl,
+        postType,
+        visibility,
+        status: "PENDING",
+        testimony: null,
       },
     });
 
-    res.status(201).json({
-      success: true,
-      message: "Prayer request submitted successfully",
-      prayerRequest,
-    });
+    return res.status(201).json({ success: true, message: "Journal post submitted successfully", prayerRequest });
   } catch (error) {
     console.error("Create prayer request error:", error);
-
-    // If database creation fails after the image was uploaded,
-    // remove the uploaded image so it doesn't become an orphan file.
-    if (req.file) {
-      try {
-        const uploadedPath = path.join(
-          __dirname,
-          "../uploads/prayer",
-          req.file.filename
-        );
-
-        if (fs.existsSync(uploadedPath)) {
-          fs.unlinkSync(uploadedPath);
-        }
-      } catch (fileError) {
-        console.error("Cleanup uploaded image error:", fileError);
-      }
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to submit prayer request",
-    });
+    cleanupUploadedFile(req);
+    return res.status(500).json({ success: false, message: "Failed to submit journal post" });
   }
 };
 
-
-// Get prayer requests
-// YOUTH → only their own requests
-// ADMIN → all requests
 const getPrayerRequests = async (req, res) => {
   try {
-    const isAdmin = req.user.role === "ADMIN";
-
+    // Private entries are visible only to their author. ADMIN does not bypass privacy.
     const prayerRequests = await prisma.prayerRequest.findMany({
-      where: isAdmin
-        ? {}
-        : {
-            userId: req.user.userId,
-          },
-
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
+      where: {
+        OR: [
+          { userId: req.user.userId },
+          { visibility: "CHURCH" },
+        ],
       },
-
-      orderBy: {
-        createdAt: "desc",
-      },
+      include: { user: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "desc" },
     });
-
-    res.json({
-      success: true,
-      prayerRequests,
-    });
+    return res.json({ success: true, prayerRequests });
   } catch (error) {
     console.error("Get prayer requests error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to get prayer requests",
-    });
+    return res.status(500).json({ success: false, message: "Failed to get journal posts" });
   }
 };
 
-
-// Update a prayer request
-// YOUTH → can update their own request
-// ADMIN → can update any request
 const updatePrayerRequest = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const {
-      senderName,
-      devotionTitle,
-      biblePassage,
-      content,
-      imageUrl,
-      status,
-    } = req.body;
-
-    const isAdmin = req.user.role === "ADMIN";
-
-    const existingRequest = await prisma.prayerRequest.findFirst({
-      where: isAdmin
-        ? { id }
-        : {
-            id,
-            userId: req.user.userId,
-          },
-    });
-
+    // Only the author can edit their post or change its visibility/status.
+    const existingRequest = await prisma.prayerRequest.findFirst({ where: { id, userId: req.user.userId } });
     if (!existingRequest) {
-      // If an image was uploaded but the request doesn't exist,
-      // clean up the newly uploaded file.
-      if (req.file) {
-        const uploadedPath = path.join(
-          __dirname,
-          "../uploads/prayer",
-          req.file.filename
-        );
+      cleanupUploadedFile(req);
+      return res.status(404).json({ success: false, message: "Journal post not found" });
+    }
 
-        if (fs.existsSync(uploadedPath)) {
-          fs.unlinkSync(uploadedPath);
-        }
-      }
+    const existingType = String(existingRequest.postType || "PRAYER_REQUEST").toUpperCase();
+    const existingStatus = String(existingRequest.status || "PENDING").toUpperCase();
+    const hasContentEdit = ["senderName", "devotionTitle", "biblePassage", "content", "imageUrl", "postType", "visibility"].some((key) => req.body[key] !== undefined) || Boolean(req.file);
 
-      return res.status(404).json({
+    // Once a prayer request is answered, its content and visibility are locked.
+    // The owner may still save an optional testimony.
+    if (existingType !== "DEVOTION" && existingStatus === "ANSWERED" && hasContentEdit) {
+      cleanupUploadedFile(req);
+      return res.status(403).json({
         success: false,
-        message: "Prayer request not found",
+        message: "Answered prayer requests cannot be edited. You may still update the testimony.",
       });
     }
 
-    let newImageUrl = existingRequest.imageUrl;
+    const data = {};
+    const { senderName, devotionTitle, biblePassage, content, imageUrl, status, postType, visibility, testimony } = req.body;
 
-    // If a new image was uploaded, replace the old image
+    if (senderName !== undefined) data.senderName = cleanOptionalString(senderName);
+    if (devotionTitle !== undefined) data.devotionTitle = cleanOptionalString(devotionTitle);
+    if (biblePassage !== undefined) data.biblePassage = cleanOptionalString(biblePassage);
+    if (content !== undefined) {
+      if (typeof content !== "string" || !content.trim()) {
+        cleanupUploadedFile(req);
+        return res.status(400).json({ success: false, message: "Post content cannot be empty" });
+      }
+      data.content = content.trim();
+    }
+    if (postType !== undefined) {
+      const normalized = String(postType).toUpperCase();
+      if (!VALID_POST_TYPES.has(normalized)) {
+        cleanupUploadedFile(req);
+        return res.status(400).json({ success: false, message: "Invalid journal post type" });
+      }
+      data.postType = normalized;
+    }
+    if (visibility !== undefined) {
+      const normalized = String(visibility).toUpperCase();
+      if (!VALID_VISIBILITIES.has(normalized)) {
+        cleanupUploadedFile(req);
+        return res.status(400).json({ success: false, message: "Invalid post visibility" });
+      }
+      data.visibility = normalized;
+    }
+    if (status !== undefined) {
+      const normalized = String(status).toUpperCase();
+      if (!VALID_STATUSES.has(normalized)) {
+        cleanupUploadedFile(req);
+        return res.status(400).json({ success: false, message: "Invalid prayer status" });
+      }
+      if (existingType === "DEVOTION" || (postType && String(postType).toUpperCase() === "DEVOTION")) {
+        cleanupUploadedFile(req);
+        return res.status(400).json({ success: false, message: "Devotions do not have prayer status" });
+      }
+      if (existingStatus === "ANSWERED" && normalized !== "ANSWERED") {
+        cleanupUploadedFile(req);
+        return res.status(403).json({ success: false, message: "Answered prayer requests cannot be changed back to Pending" });
+      }
+      data.status = normalized;
+    }
+    if (testimony !== undefined) data.testimony = cleanOptionalString(testimony);
+
+    let newImageUrl = existingRequest.imageUrl;
     if (req.file) {
       newImageUrl = `/uploads/prayer/${req.file.filename}`;
-
-      if (existingRequest.imageUrl) {
-        deleteImageFile(existingRequest.imageUrl);
-      }
+      data.imageUrl = newImageUrl;
     } else if (imageUrl !== undefined) {
-      // Preserve support for manually setting imageUrl to null
-      // or another existing value.
-      newImageUrl =
-        imageUrl === null ? null : imageUrl.trim();
-
-      // If the image was explicitly removed, delete the old file.
-      if (
-        imageUrl === null &&
-        existingRequest.imageUrl
-      ) {
-        deleteImageFile(existingRequest.imageUrl);
-      }
+      newImageUrl = imageUrl === null || imageUrl === "" ? null : String(imageUrl).trim();
+      data.imageUrl = newImageUrl;
     }
 
-    const prayerRequest = await prisma.prayerRequest.update({
-      where: {
-        id,
-      },
-
-      data: {
-        ...(senderName !== undefined && {
-          senderName:
-            senderName === null
-              ? null
-              : senderName.trim(),
-        }),
-
-        ...(devotionTitle !== undefined && {
-          devotionTitle:
-            devotionTitle === null
-              ? null
-              : devotionTitle.trim(),
-        }),
-
-        ...(biblePassage !== undefined && {
-          biblePassage:
-            biblePassage === null
-              ? null
-              : biblePassage.trim(),
-        }),
-
-        ...(content !== undefined && {
-          content: content.trim(),
-        }),
-
-        imageUrl: newImageUrl,
-
-        ...(status !== undefined && {
-          status,
-        }),
-      },
-    });
-
-    res.json({
-      success: true,
-      message: "Prayer request updated successfully",
-      prayerRequest,
-    });
+    const prayerRequest = await prisma.prayerRequest.update({ where: { id }, data });
+    if (data.status && data.status !== existingStatus && existingRequest.userId) {
+      try {
+        await prisma.notification.create({ data: {
+          userId: existingRequest.userId,
+          type: "PRAYER_STATUS",
+          title: data.status === "ANSWERED" ? "Answered prayer marked" : "Prayer request updated",
+          message: data.status === "ANSWERED" ? "You marked your prayer request as answered. May this testimony encourage the church!" : "Your prayer request status has changed.",
+          relatedId: existingRequest.id,
+        } });
+      } catch (notificationError) { console.error("Prayer notification error:", notificationError.message); }
+    }
+    if (newImageUrl !== existingRequest.imageUrl && existingRequest.imageUrl) deleteImageFile(existingRequest.imageUrl);
+    return res.json({ success: true, message: "Journal post updated successfully", prayerRequest });
   } catch (error) {
     console.error("Update prayer request error:", error);
-
-    // Clean up newly uploaded image if update failed
-    if (req.file) {
-      const uploadedPath = path.join(
-        __dirname,
-        "../uploads/prayer",
-        req.file.filename
-      );
-
-      if (fs.existsSync(uploadedPath)) {
-        fs.unlinkSync(uploadedPath);
-      }
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to update prayer request",
-    });
+    cleanupUploadedFile(req);
+    return res.status(500).json({ success: false, message: "Failed to update journal post" });
   }
 };
 
-
-// Delete a prayer request
-// YOUTH → can delete their own request
-// ADMIN → can delete any request
 const deletePrayerRequest = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const isAdmin = req.user.role === "ADMIN";
-
-    const existingRequest = await prisma.prayerRequest.findFirst({
-      where: isAdmin
-        ? { id }
-        : {
-            id,
-            userId: req.user.userId,
-          },
-    });
-
-    if (!existingRequest) {
-      return res.status(404).json({
-        success: false,
-        message: "Prayer request not found",
-      });
-    }
-
-    // Delete the database record
-    await prisma.prayerRequest.delete({
-      where: {
-        id,
-      },
-    });
-
-    // Delete the associated image from uploads/prayer/
-    if (existingRequest.imageUrl) {
-      deleteImageFile(existingRequest.imageUrl);
-    }
-
-    res.json({
-      success: true,
-      message: "Prayer request deleted successfully",
-    });
+    // Private and shared posts can only be deleted by their author.
+    const existingRequest = await prisma.prayerRequest.findFirst({ where: { id, userId: req.user.userId } });
+    if (!existingRequest) return res.status(404).json({ success: false, message: "Journal post not found" });
+    await prisma.prayerRequest.delete({ where: { id } });
+    if (existingRequest.imageUrl) deleteImageFile(existingRequest.imageUrl);
+    return res.json({ success: true, message: "Journal post deleted successfully" });
   } catch (error) {
     console.error("Delete prayer request error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete prayer request",
-    });
+    return res.status(500).json({ success: false, message: "Failed to delete journal post" });
   }
 };
 
-
-module.exports = {
-  createPrayerRequest,
-  getPrayerRequests,
-  updatePrayerRequest,
-  deletePrayerRequest,
-};
+module.exports = { createPrayerRequest, getPrayerRequests, updatePrayerRequest, deletePrayerRequest };

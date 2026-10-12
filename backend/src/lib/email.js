@@ -105,4 +105,15 @@ async function sendVerificationEmail(email, name, code) {
   await mailjetSend({ to: email, subject, text, html });
 }
 
-module.exports = { sendVerificationEmail };
+
+async function sendPasswordResetEmail(email, name, code) {
+  const safeName = String(name || 'there')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const subject = 'Your iKonek password recovery code';
+  const text = `Hello ${name || 'there'},\n\nYour iKonek password recovery code is: ${code}\n\nThis code expires in 10 minutes. If you did not request a password reset, you can ignore this email.`;
+  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;background:#f8fafc;padding:24px;color:#0f172a"><div style="max-width:520px;margin:auto;background:#fff;padding:28px;border-radius:12px"><h2>iKonek Password Recovery</h2><p>Hello ${safeName},</p><p>Use this code to reset your password:</p><div style="font-size:32px;font-weight:700;letter-spacing:8px;text-align:center;padding:18px;background:#f1f5f9;border-radius:8px">${code}</div><p style="margin-top:20px">This code expires in <strong>10 minutes</strong> and can be used once.</p><p>If you did not request a password reset, you can ignore this email.</p></div></body></html>`;
+  await mailjetSend({ to: email, subject, text, html });
+}
+
+module.exports = { sendVerificationEmail, sendPasswordResetEmail };

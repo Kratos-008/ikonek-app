@@ -26,6 +26,10 @@ export default function PrayerJournalScreen({ navigation }) {
   const { isDarkMode, colors } = useTheme();
   const styles = createStyles(isDarkMode, colors);
   const [senderName, setSenderName] = useState('');
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [postType, setPostType] = useState('PRAYER_REQUEST');
+  const [visibility, setVisibility] = useState('PRIVATE');
+  const [testimonyDrafts, setTestimonyDrafts] = useState({});
   const [devotionTitle, setDevotionTitle] = useState('');
   const [biblePassage, setBiblePassage] = useState('');
   const [prayerRequest, setPrayerRequest] = useState('');
@@ -33,6 +37,9 @@ export default function PrayerJournalScreen({ navigation }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [editingRequestId, setEditingRequestId] = useState(null);
+  const [searchText, setSearchText] = useState('');
+  const [listFilter, setListFilter] = useState('ALL');
 
   // Load the currently logged-in account.
   const loadLoggedInUser = useCallback(async () => {
@@ -42,9 +49,8 @@ export default function PrayerJournalScreen({ navigation }) {
       if (savedUser) {
         const user = JSON.parse(savedUser);
 
-        if (user?.name) {
-          setSenderName(user.name);
-        }
+        if (user?.name) setSenderName(user.name);
+        if (user?.id || user?.userId) setCurrentUserId(user.id || user.userId);
       }
     } catch (error) {
       console.error('Load logged-in user error:', error);
@@ -188,21 +194,13 @@ export default function PrayerJournalScreen({ navigation }) {
       return;
     }
 
-    if (!title) {
-      Alert.alert(
-        'Missing Title',
-        'Please enter a devotion title.'
-      );
-
+    if (postType === 'DEVOTION' && !title) {
+      Alert.alert('Missing Title', 'Please enter a devotion title.');
       return;
     }
 
-    if (!passage) {
-      Alert.alert(
-        'Missing Bible Passage',
-        'Please enter the Bible passage.'
-      );
-
+    if (postType === 'DEVOTION' && !passage) {
+      Alert.alert('Missing Bible Passage', 'Please enter the Bible passage.');
       return;
     }
 
@@ -231,6 +229,9 @@ export default function PrayerJournalScreen({ navigation }) {
 
       const formData = new FormData();
 
+      formData.append('senderName', sender);
+      formData.append('postType', postType);
+      formData.append('visibility', visibility);
       formData.append('devotionTitle', title);
       formData.append('biblePassage', passage);
       formData.append('content', content);
@@ -247,8 +248,8 @@ export default function PrayerJournalScreen({ navigation }) {
   formData.append('image', file);
 }
 
-      const response = await fetch(`${API_URL}/api/prayer`, {
-        method: 'POST',
+      const response = await fetch(editingRequestId ? `${API_URL}/api/prayer/${editingRequestId}` : `${API_URL}/api/prayer`, {
+        method: editingRequestId ? 'PUT' : 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/json',
@@ -266,14 +267,18 @@ export default function PrayerJournalScreen({ navigation }) {
         );
       }
 
+      const wasEditing = Boolean(editingRequestId);
       setDevotionTitle('');
       setBiblePassage('');
       setPrayerRequest('');
       setSelectedImage(null);
+      setPostType('PRAYER_REQUEST');
+      setVisibility('PRIVATE');
+      setEditingRequestId(null);
 
       Alert.alert(
-        'Devotion Posted',
-        'Your devotion or prayer request has been posted successfully.'
+        wasEditing ? 'Post Updated' : (postType === 'DEVOTION' ? 'Devotion Posted' : 'Prayer Request Posted'),
+        wasEditing ? 'Your existing post was updated.' : (visibility === 'CHURCH' ? 'Your post was shared with the church.' : 'Your post was saved privately.')
       );
 
       await loadPrayerRequests();
@@ -312,10 +317,11 @@ export default function PrayerJournalScreen({ navigation }) {
         return;
       }
 
-      const newStatus =
-        String(currentStatus).toUpperCase() === 'ANSWERED'
-          ? 'PENDING'
-          : 'ANSWERED';
+      if (String(currentStatus).toUpperCase() === 'ANSWERED') {
+        Alert.alert('Already Answered', 'Answered prayer requests cannot be changed back to Pending.');
+        return;
+      }
+      const newStatus = 'ANSWERED';
 
       const response = await fetch(
         `${API_URL}/api/prayer/${requestId}`,
@@ -365,6 +371,58 @@ export default function PrayerJournalScreen({ navigation }) {
           'Could not update the prayer status.'
       );
     }
+  };
+
+  // Save an optional testimony on an answered prayer.
+  const handleSaveTestimony = async (requestId) => {
+    try {
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      if (!token) {
+        Alert.alert('Session Expired', 'Please sign in again.');
+        return;
+      }
+      const response = await fetch(`${API_URL}/api/prayer/${requestId}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ testimony: testimonyDrafts[requestId] || '' }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not save testimony');
+      setRequests((items) => items.map((item) => item.id === requestId ? { ...item, testimony: data.prayerRequest?.testimony ?? (testimonyDrafts[requestId] || '') } : item));
+      Alert.alert('Saved', 'Your testimony has been saved.');
+    } catch (error) {
+      Alert.alert('Save Failed', error.message || 'Could not save testimony.');
+    }
+  };
+
+  // Load an existing post into the form. Answered prayer requests are locked.
+  const handleEditRequest = (request) => {
+    if (request.userId !== currentUserId) {
+      Alert.alert('Not Allowed', 'You can only edit your own posts.');
+      return;
+    }
+    if (request.postType !== 'DEVOTION' && String(request.status || 'PENDING').toUpperCase() === 'ANSWERED') {
+      Alert.alert('Post Locked', 'Answered prayer requests can no longer be edited.');
+      return;
+    }
+    setEditingRequestId(request.id);
+    setPostType(request.postType === 'DEVOTION' ? 'DEVOTION' : 'PRAYER_REQUEST');
+    setVisibility(request.visibility || 'PRIVATE');
+    setDevotionTitle(request.devotionTitle || '');
+    setBiblePassage(request.biblePassage || '');
+    setPrayerRequest(request.content || '');
+    setSelectedImage(null);
+    Alert.alert('Edit Post', 'Make your changes in the form above, then tap Save Changes.');
+  };
+
+  const cancelEditing = () => {
+    setEditingRequestId(null);
+    setPostType('PRAYER_REQUEST');
+    setVisibility('PRIVATE');
+    setDevotionTitle('');
+    setBiblePassage('');
+    setPrayerRequest('');
+    setSelectedImage(null);
   };
 
   // Delete a prayer request.
@@ -591,8 +649,26 @@ export default function PrayerJournalScreen({ navigation }) {
 
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>
-            Add New Devotion / Request
+            {editingRequestId ? 'Edit Journal Post' : (postType === 'DEVOTION' ? 'Add New Devotion' : 'Add Prayer Request')}
           </Text>
+
+          <Text style={styles.accountLabel}>Post type</Text>
+          <View style={styles.selectorRow}>
+            {[{ value: 'PRAYER_REQUEST', label: '🙏 Prayer Request' }, { value: 'DEVOTION', label: '📖 Devotion' }].map((option) => (
+              <TouchableOpacity key={option.value} onPress={() => setPostType(option.value)} disabled={submitting} style={[styles.selectorButton, postType === option.value && styles.selectorButtonActive]}>
+                <Text style={[styles.selectorText, postType === option.value && styles.selectorTextActive]}>{option.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.accountLabel}>Visibility</Text>
+          <View style={styles.selectorRow}>
+            {[{ value: 'PRIVATE', label: '🔒 Only Me' }, { value: 'CHURCH', label: '⛪ Share with Church' }].map((option) => (
+              <TouchableOpacity key={option.value} onPress={() => setVisibility(option.value)} disabled={submitting} style={[styles.selectorButton, visibility === option.value && styles.selectorButtonActive]}>
+                <Text style={[styles.selectorText, visibility === option.value && styles.selectorTextActive]}>{option.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
           <Text style={styles.accountLabel}>
             Sending as
@@ -608,30 +684,30 @@ export default function PrayerJournalScreen({ navigation }) {
             </Text>
           </View>
 
-          <TextInput
+          {postType === 'DEVOTION' && <TextInput
             style={styles.input}
             placeholder="Devotion Title (e.g. Strength & Comfort)"
             placeholderTextColor="#64748B"
             value={devotionTitle}
             onChangeText={setDevotionTitle}
             editable={!submitting}
-          />
+          />}
 
-          <TextInput
+          {postType === 'DEVOTION' && <TextInput
             style={styles.input}
             placeholder="Bible Passage (e.g. Philippians 4:6-7)"
             placeholderTextColor="#64748B"
             value={biblePassage}
             onChangeText={setBiblePassage}
             editable={!submitting}
-          />
+          />}
 
           <TextInput
             style={[
               styles.input,
               styles.reflectionInput,
             ]}
-            placeholder="Write your reflection or prayer details..."
+            placeholder={postType === 'DEVOTION' ? 'Write your reflection...' : 'Write your prayer request...'}
             placeholderTextColor="#64748B"
             value={prayerRequest}
             onChangeText={setPrayerRequest}
@@ -696,15 +772,20 @@ export default function PrayerJournalScreen({ navigation }) {
               <ActivityIndicator color="#FFFFFF" />
             ) : (
               <Text style={styles.postButtonText}>
-                + Post Devotion
+                {editingRequestId ? 'Save Changes' : (postType === 'DEVOTION' ? '+ Post Devotion' : '+ Post Prayer Request')}
               </Text>
             )}
           </TouchableOpacity>
+          {editingRequestId && (
+            <TouchableOpacity style={styles.cancelEditButton} onPress={cancelEditing}>
+              <Text style={styles.cancelEditText}>Cancel Edit</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.requestsHeader}>
           <Text style={styles.requestsTitle}>
-            My Requests & Devotions
+            My Journal & Church Posts
           </Text>
 
           <TouchableOpacity
@@ -715,6 +796,32 @@ export default function PrayerJournalScreen({ navigation }) {
               Refresh
             </Text>
           </TouchableOpacity>
+        </View>
+
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search sender, prayer title, or devotion..."
+          placeholderTextColor={colors.muted || '#64748B'}
+          value={searchText}
+          onChangeText={setSearchText}
+          autoCapitalize="none"
+          returnKeyType="search"
+        />
+        <View style={styles.filterRow}>
+          {[
+            { key: 'ALL', label: 'All' },
+            { key: 'PENDING', label: 'Pending' },
+            { key: 'ANSWERED', label: 'Answered' },
+            { key: 'DEVOTIONS', label: 'Devotions' },
+          ].map((filter) => (
+            <TouchableOpacity
+              key={filter.key}
+              style={[styles.filterButton, listFilter === filter.key && styles.filterButtonActive]}
+              onPress={() => setListFilter(filter.key)}
+            >
+              <Text style={[styles.filterButtonText, listFilter === filter.key && styles.filterButtonTextActive]}>{filter.label}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {loading ? (
@@ -728,23 +835,48 @@ export default function PrayerJournalScreen({ navigation }) {
               Loading your requests...
             </Text>
           </View>
-        ) : requests.length === 0 ? (
+        ) : requests.filter((request) => {
+          const type = String(request.postType || 'PRAYER_REQUEST').toUpperCase();
+          const status = String(request.status || 'PENDING').toUpperCase();
+          const query = searchText.trim().toLowerCase();
+          const searchable = [
+            request.senderName,
+            request.user?.name,
+            request.devotionTitle,
+            request.content,
+            request.biblePassage,
+          ].filter(Boolean).join(' ').toLowerCase();
+          const matchesSearch = !query || searchable.includes(query);
+          const matchesFilter =
+            listFilter === 'ALL' ||
+            (listFilter === 'DEVOTIONS' && type === 'DEVOTION') ||
+            (listFilter === 'PENDING' && type !== 'DEVOTION' && status === 'PENDING') ||
+            (listFilter === 'ANSWERED' && type !== 'DEVOTION' && status === 'ANSWERED');
+          return matchesSearch && matchesFilter;
+        }).length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyIcon}>
               🙏
             </Text>
 
             <Text style={styles.emptyTitle}>
-              No Requests Yet
+              {searchText.trim() || listFilter !== 'ALL' ? 'No Matching Posts' : 'No Requests Yet'}
             </Text>
 
             <Text style={styles.emptyText}>
-              Your prayer requests and devotions will
-              appear here after you post them.
+              {searchText.trim() || listFilter !== 'ALL' ? 'Try a different search or filter.' : 'Your prayer requests and devotions will appear here after you post them.'}
             </Text>
           </View>
         ) : (
-          requests.map((request) => {
+          requests.filter((request) => {
+            const type = String(request.postType || 'PRAYER_REQUEST').toUpperCase();
+            const status = String(request.status || 'PENDING').toUpperCase();
+            const query = searchText.trim().toLowerCase();
+            const searchable = [request.senderName, request.user?.name, request.devotionTitle, request.content, request.biblePassage].filter(Boolean).join(' ').toLowerCase();
+            const matchesSearch = !query || searchable.includes(query);
+            const matchesFilter = listFilter === 'ALL' || (listFilter === 'DEVOTIONS' && type === 'DEVOTION') || (listFilter === 'PENDING' && type !== 'DEVOTION' && status === 'PENDING') || (listFilter === 'ANSWERED' && type !== 'DEVOTION' && status === 'ANSWERED');
+            return matchesSearch && matchesFilter;
+          }).map((request) => {
             const imageUrl =
               getRequestImage(request.imageUrl);
 
@@ -772,22 +904,23 @@ export default function PrayerJournalScreen({ navigation }) {
                     </Text>
                   </View>
 
-                  <TouchableOpacity
-                    style={styles.deleteButton}
-                    onPress={() =>
-                      handleDeleteRequest(
-                        request.id
-                      )
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.deleteButtonText
-                      }
-                    >
-                      Delete
-                    </Text>
-                  </TouchableOpacity>
+                  {request.userId === currentUserId && (
+                    <View style={styles.cardActions}>
+                      {(request.postType === 'DEVOTION' || String(request.status || 'PENDING').toUpperCase() !== 'ANSWERED') && (
+                        <TouchableOpacity style={styles.editButton} onPress={() => handleEditRequest(request)}>
+                          <Text style={styles.editButtonText}>Edit</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity style={styles.deleteButton} onPress={() => handleDeleteRequest(request.id)}>
+                        <Text style={styles.deleteButtonText}>Delete</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.postMetaRow}>
+                  <Text style={[styles.postTypeBadge, request.postType === 'DEVOTION' ? styles.devotionBadge : styles.prayerBadge]}>{request.postType === 'DEVOTION' ? '📖 Devotion' : request.postType === 'PRAYER_REQUEST' ? '🙏 Prayer Request' : 'Journal Entry'}</Text>
+                  <Text style={styles.postMetaText}>{request.visibility === 'CHURCH' ? '⛪ Shared with Church' : '🔒 Private'}</Text>
                 </View>
 
                 {request.devotionTitle && (
@@ -820,29 +953,24 @@ export default function PrayerJournalScreen({ navigation }) {
                     🕒 {formatDate(request.createdAt)}
                   </Text>
 
-                  <TouchableOpacity
-                    style={[
-                      styles.statusBadge,
-                      getStatusStyle(
-                        request.status
-                      ),
-                    ]}
-                    onPress={() =>
-                      handleChangeStatus(
-                        request.id,
-                        request.status
-                      )
-                    }
-                  >
-                    <Text
-                      style={styles.statusText}
-                    >
-                      {formatStatus(
-                        request.status
-                      )}
-                    </Text>
-                  </TouchableOpacity>
+                  {request.postType !== 'DEVOTION' && (
+                    request.userId === currentUserId && String(request.status || 'PENDING').toUpperCase() !== 'ANSWERED' ? (
+                      <TouchableOpacity style={[styles.statusBadge, getStatusStyle(request.status)]} onPress={() => handleChangeStatus(request.id, request.status)}>
+                        <Text style={styles.statusText}>Mark Answered</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={[styles.statusBadge, getStatusStyle(request.status)]}><Text style={styles.statusText}>{formatStatus(request.status)}</Text></View>
+                    )
+                  )}
                 </View>
+
+                {request.postType !== 'DEVOTION' && String(request.status).toUpperCase() === 'ANSWERED' && request.userId === currentUserId && (
+                  <View style={styles.testimonyBox}>
+                    <Text style={styles.accountLabel}>Answered prayer testimony (optional)</Text>
+                    <TextInput style={styles.testimonyInput} placeholder="How was this prayer answered?" placeholderTextColor="#64748B" multiline textAlignVertical="top" value={testimonyDrafts[request.id] !== undefined ? testimonyDrafts[request.id] : (request.testimony || '')} onChangeText={(value) => setTestimonyDrafts((old) => ({ ...old, [request.id]: value }))} />
+                    <TouchableOpacity style={styles.saveTestimonyButton} onPress={() => handleSaveTestimony(request.id)}><Text style={styles.saveTestimonyText}>Save Testimony</Text></TouchableOpacity>
+                  </View>
+                )}
               </View>
             );
           })
@@ -941,6 +1069,49 @@ const createStyles = (isDarkMode, colors) => StyleSheet.create({
     padding: 29,
     marginBottom: 39,
   },
+
+  selectorRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  selectorButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.input || colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  selectorButtonActive: {
+    borderColor: '#2563EB',
+    backgroundColor: isDarkMode ? '#1E3A8A' : '#DBEAFE',
+  },
+  selectorText: { color: colors.text, fontWeight: '600', textAlign: 'center' },
+  selectorTextActive: { color: isDarkMode ? '#FFFFFF' : '#1D4ED8' },
+  searchInput: { minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, color: colors.text, backgroundColor: colors.card, marginBottom: 10 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  filterButton: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.card },
+  filterButtonActive: { backgroundColor: isDarkMode ? '#1E3A8A' : '#DBEAFE', borderColor: '#60A5FA' },
+  filterButtonText: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  filterButtonTextActive: { color: isDarkMode ? '#FFFFFF' : '#1D4ED8' },
+  cardActions: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  editButton: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9, backgroundColor: isDarkMode ? '#1E3A8A' : '#DBEAFE' },
+  editButtonText: { color: isDarkMode ? '#DBEAFE' : '#1D4ED8', fontSize: 12, fontWeight: '800' },
+  cancelEditButton: { alignSelf: 'flex-start', marginTop: 10, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' },
+  cancelEditText: { color: colors.text, fontWeight: '700' },
+  postTypeBadge: { overflow: 'hidden', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, fontSize: 12, fontWeight: '800' },
+  devotionBadge: { backgroundColor: isDarkMode ? '#1E3A8A' : '#DBEAFE', color: isDarkMode ? '#DBEAFE' : '#1D4ED8' },
+  prayerBadge: { backgroundColor: isDarkMode ? '#4C1D95' : '#EDE9FE', color: isDarkMode ? '#E9D5FF' : '#6D28D9' },
+  postMetaRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 10 },
+  postMetaText: { color: colors.muted || colors.text, fontSize: 12, fontWeight: '600' },
+  testimonyBox: { marginTop: 12, gap: 8 },
+  testimonyInput: { minHeight: 90, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, color: colors.text, backgroundColor: colors.card },
+  saveTestimonyButton: { alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, backgroundColor: '#2563EB' },
+  saveTestimonyText: { color: '#FFFFFF', fontWeight: '700' },
 
   formTitle: {
     color: colors.text,
@@ -1158,11 +1329,11 @@ const createStyles = (isDarkMode, colors) => StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 9,
-    backgroundColor: '#7F1D1D',
+    backgroundColor: isDarkMode ? '#7F1D1D' : '#FEE2E2',
   },
 
   deleteButtonText: {
-    color: colors.text,
+    color: isDarkMode ? '#FEE2E2' : '#B91C1C',
     fontSize: 12,
     fontWeight: '800',
   },
@@ -1216,15 +1387,15 @@ const createStyles = (isDarkMode, colors) => StyleSheet.create({
   },
 
   pendingStatus: {
-    backgroundColor: '#854D0E',
+    backgroundColor: isDarkMode ? '#854D0E' : '#FEF3C7',
   },
 
   answeredStatus: {
-    backgroundColor: '#166534',
+    backgroundColor: isDarkMode ? '#166534' : '#DCFCE7',
   },
 
   statusText: {
-    color: colors.text,
+    color: isDarkMode ? '#FFFFFF' : '#334155',
     fontSize: 11,
     fontWeight: '800',
   },

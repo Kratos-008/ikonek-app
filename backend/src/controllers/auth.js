@@ -2,7 +2,15 @@ const prisma = require("../lib/prisma");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const { sendVerificationEmail } = require("../lib/email");
+const { sendVerificationEmail, sendPasswordResetEmail } = require("../lib/email");
+
+function hashRegistrationCode(code) {
+  return crypto.createHash("sha256").update(String(code).trim().toUpperCase()).digest("hex");
+}
+
+function normalizePersonName(name) {
+  return String(name || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
 
 const VERIFICATION_MINUTES = 10;
 
@@ -29,7 +37,7 @@ async function createAndSendVerification(user) {
 // Register
 const register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, linkingCode } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -101,6 +109,31 @@ const register = async (req, res) => {
       });
     }
 
+    let pendingMemberLinkCodeHash = null;
+    if (linkingCode !== undefined && String(linkingCode).trim()) {
+      const normalizedLinkingCode = String(linkingCode).trim().toUpperCase();
+      if (!/^IK-[A-F0-9]{8}-[A-F0-9]{8}$/.test(normalizedLinkingCode)) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_LINKING_CODE",
+          message: "Enter a valid iKonek member registration code.",
+        });
+      }
+
+      const member = await prisma.youthProfile.findUnique({
+        where: { registrationCodeHash: hashRegistrationCode(normalizedLinkingCode) },
+        select: { id: true, name: true, userId: true },
+      });
+      if (!member || member.userId || normalizePersonName(member.name) !== normalizePersonName(name)) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_MEMBER_LINK",
+          message: "The code could not be matched to this name, or the member is already linked. Please check the code or ask an Admin for help.",
+        });
+      }
+      pendingMemberLinkCodeHash = hashRegistrationCode(normalizedLinkingCode);
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
@@ -109,6 +142,7 @@ const register = async (req, res) => {
         email: normalizedEmail,
         password: hashedPassword,
         role: "YOUTH",
+        pendingMemberLinkCodeHash,
         emailVerified: false,
       },
     });
@@ -201,13 +235,55 @@ const verifyEmail = async (req, res) => {
       });
     }
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
+    await prisma.$transaction(async (tx) => {
+      let linkedRole = user.role;
+      if (user.pendingMemberLinkCodeHash) {
+        const member = await tx.youthProfile.findUnique({
+          where: { registrationCodeHash: user.pendingMemberLinkCodeHash },
+          select: { id: true, userId: true, name: true, accountRole: true },
+        });
+
+        if (!member || member.userId || normalizePersonName(member.name) !== normalizePersonName(user.name)) {
+          const linkError = new Error("This member code has already been used or is no longer valid. Please contact an Admin.");
+          linkError.code = "MEMBER_LINK_UNAVAILABLE";
+          throw linkError;
+        }
+
+        linkedRole = member.accountRole === "LEADER" ? "LEADER" : "YOUTH";
+        const claimed = await tx.youthProfile.updateMany({
+          where: {
+            id: member.id,
+            userId: null,
+            registrationCodeHash: user.pendingMemberLinkCodeHash,
+          },
+          data: { userId: user.id, registrationCodeHash: null },
+        });
+        if (claimed.count !== 1) {
+          const linkError = new Error("This member code has already been used. Please contact an Admin.");
+          linkError.code = "MEMBER_LINK_UNAVAILABLE";
+          throw linkError;
+        }
+      }
+
+      const userUpdate = {
         emailVerified: true,
         verificationCodeHash: null,
         verificationExpiresAt: null,
-      },
+        pendingMemberLinkCodeHash: null,
+      };
+      if (user.pendingMemberLinkCodeHash) userUpdate.role = linkedRole;
+      await tx.user.update({
+        where: { id: user.id },
+        data: userUpdate,
+      });
+      if (user.pendingMemberLinkCodeHash) {
+        await tx.notification.create({ data: {
+          userId: user.id,
+          type: "ACCOUNT_LINKED",
+          title: "Congratulations! 🎉",
+          message: "Your account has been successfully linked to your existing iKonek member record. Welcome! You're all set to continue your journey with us.",
+        } });
+      }
     });
 
     res.json({
@@ -215,6 +291,13 @@ const verifyEmail = async (req, res) => {
       message: "Email verified successfully. You can now sign in.",
     });
   } catch (error) {
+    if (error.code === "MEMBER_LINK_UNAVAILABLE") {
+      return res.status(409).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+    }
     console.error("Verify email error:", error);
     res.status(500).json({
       success: false,
@@ -277,6 +360,78 @@ const resendVerification = async (req, res) => {
       success: false,
       message: "Failed to resend verification code",
     });
+  }
+};
+
+// Link an already-created login account to an existing member profile.
+// Useful for members who registered before the linking-code feature existed.
+const linkExistingMember = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    const linkingCode = String(req.body.linkingCode || "").trim().toUpperCase();
+
+    if (!userId || !linkingCode) {
+      return res.status(400).json({
+        success: false,
+        message: "A member registration code is required.",
+      });
+    }
+    if (!/^IK-[A-F0-9]{8}-[A-F0-9]{8}$/.test(linkingCode)) {
+      return res.status(400).json({ success: false, message: "Enter a valid iKonek member registration code." });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.emailVerified) {
+      return res.status(401).json({ success: false, message: "Please sign in with a verified account." });
+    }
+    if (user.role === "ADMIN") {
+      return res.status(403).json({ success: false, message: "Admin accounts cannot claim a youth member record." });
+    }
+
+    const codeHash = hashRegistrationCode(linkingCode);
+    const member = await prisma.youthProfile.findUnique({
+      where: { registrationCodeHash: codeHash },
+      select: { id: true, name: true, userId: true, accountRole: true },
+    });
+    if (!member || member.userId || normalizePersonName(member.name) !== normalizePersonName(user.name)) {
+      return res.status(400).json({
+        success: false,
+        message: "The code could not be matched to your account name, or the member is already linked. Please ask an Admin for help.",
+      });
+    }
+
+    const alreadyLinked = await prisma.youthProfile.findUnique({ where: { userId } });
+    if (alreadyLinked) {
+      return res.status(409).json({ success: false, message: "Your account is already linked to a member profile." });
+    }
+
+    const newRole = member.accountRole === "LEADER" ? "LEADER" : "YOUTH";
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.youthProfile.updateMany({
+        where: { id: member.id, userId: null, registrationCodeHash: codeHash },
+        data: { userId, registrationCodeHash: null },
+      });
+      if (claimed.count !== 1) {
+        const linkError = new Error("This member code has already been used. Please ask an Admin for a new code.");
+        linkError.code = "MEMBER_LINK_UNAVAILABLE";
+        throw linkError;
+      }
+      await tx.user.update({ where: { id: userId }, data: { role: newRole } });
+    });
+
+    const token = jwt.sign({ userId: user.id, role: newRole }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    return res.json({
+      success: true,
+      message: "Your account has been linked to your existing member profile.",
+      token,
+      user: { id: user.id, name: user.name, email: user.email, role: newRole },
+    });
+  } catch (error) {
+    if (error.code === "MEMBER_LINK_UNAVAILABLE") {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    console.error("Link existing member error:", error);
+    return res.status(500).json({ success: false, message: "Failed to link member profile." });
   }
 };
 
@@ -352,9 +507,136 @@ const login = async (req, res) => {
   }
 };
 
+
+const PASSWORD_RESET_MINUTES = 10;
+
+const requestPasswordReset = async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ success: false, message: "Enter a valid email address." });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    // Always avoid exposing whether an email is registered. Enforce the resend
+    // cooldown server-side using the existing code expiry timestamp (no migration).
+    const publicResponse = {
+      success: true,
+      message: "If an account exists for this email, a recovery code has been sent.",
+    };
+    if (!user || !user.emailVerified) {
+      return res.json({ ...publicResponse, retryAfterSeconds: PASSWORD_RESET_MINUTES * 60 });
+    }
+
+    if (user.passwordResetCodeHash && user.passwordResetExpiresAt) {
+      const remainingMs = user.passwordResetExpiresAt.getTime() - Date.now();
+      if (remainingMs > 0) {
+        return res.status(429).json({
+          success: false,
+          message: "A recovery code was recently requested. Please wait for the countdown to finish before requesting another.",
+          retryAfterSeconds: Math.ceil(remainingMs / 1000),
+        });
+      }
+    }
+
+    const code = crypto.randomInt(100000, 1000000).toString();
+    const codeHash = await bcrypt.hash(code, 10);
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_MINUTES * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordResetCodeHash: codeHash, passwordResetExpiresAt: expiresAt },
+    });
+
+    try {
+      await sendPasswordResetEmail(user.email, user.name, code);
+    } catch (emailError) {
+      console.error("Password reset email error:", emailError);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordResetCodeHash: null, passwordResetExpiresAt: null },
+      });
+      return res.status(503).json({
+        success: false,
+        message: "We could not send the recovery email. Please try again later.",
+      });
+    }
+
+    return res.json({ ...publicResponse, retryAfterSeconds: PASSWORD_RESET_MINUTES * 60 });
+  } catch (error) {
+    console.error("Request password reset error:", error);
+    return res.status(500).json({ success: false, message: "Unable to request password recovery." });
+  }
+};
+
+const verifyPasswordReset = async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const code = String(req.body.code || "").trim();
+    if (!/^\S+@\S+\.\S+$/.test(email) || !/^\d{6}$/.test(code)) {
+      return res.status(400).json({ success: false, message: "Enter a valid email and 6-digit code." });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !user.emailVerified || !user.passwordResetCodeHash || !user.passwordResetExpiresAt ||
+        Date.now() > user.passwordResetExpiresAt.getTime()) {
+      return res.status(400).json({ success: false, message: "The recovery code is invalid or expired. Request a new code." });
+    }
+
+    const valid = await bcrypt.compare(code, user.passwordResetCodeHash);
+    if (!valid) return res.status(400).json({ success: false, message: "The recovery code is invalid or expired. Request a new code." });
+
+    return res.json({ success: true, message: "Code verified." });
+  } catch (error) {
+    console.error("Verify password reset error:", error);
+    return res.status(500).json({ success: false, message: "Unable to verify the recovery code." });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const code = String(req.body.code || "").trim();
+    const newPassword = String(req.body.newPassword || "");
+
+    if (!/^\S+@\S+\.\S+$/.test(email) || !/^\d{6}$/.test(code) || newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: "Enter a valid recovery code and a password with at least 8 characters." });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !user.emailVerified || !user.passwordResetCodeHash || !user.passwordResetExpiresAt ||
+        Date.now() > user.passwordResetExpiresAt.getTime()) {
+      return res.status(400).json({ success: false, message: "The recovery code is invalid or expired. Request a new code." });
+    }
+
+    const valid = await bcrypt.compare(code, user.passwordResetCodeHash);
+    if (!valid) return res.status(400).json({ success: false, message: "The recovery code is invalid or expired. Request a new code." });
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        passwordResetCodeHash: null,
+        passwordResetExpiresAt: null,
+      },
+    });
+
+    return res.json({ success: true, message: "Password updated successfully. You can now sign in." });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    return res.status(500).json({ success: false, message: "Unable to reset the password." });
+  }
+};
+
 module.exports = {
+  requestPasswordReset,
+  verifyPasswordReset,
+  resetPassword,
   register,
   verifyEmail,
   resendVerification,
   login,
+  linkExistingMember,
 };

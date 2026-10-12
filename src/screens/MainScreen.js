@@ -1,5 +1,4 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
-
 import {
   ActivityIndicator,
   ImageBackground,
@@ -74,6 +73,14 @@ const getDailyVerse = () => {
   ];
 };
 
+const getTimeGreeting = () => {
+  const hour = new Date().getHours();
+
+  if (hour >= 5 && hour < 12) return 'Good morning';
+  if (hour >= 12 && hour < 18) return 'Good afternoon';
+  return 'Good evening';
+};
+
 export default function MainScreen({
   navigation,
   user,
@@ -81,13 +88,41 @@ export default function MainScreen({
   onOpenDrawer,
 }) {
   const { isDarkMode } = useTheme();
+  const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting());
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+
+  useEffect(() => {
+    // Keep the greeting current while MainScreen remains open.
+    const greetingInterval = setInterval(() => {
+      setTimeGreeting(getTimeGreeting());
+    }, 60 * 1000);
+
+    return () => clearInterval(greetingInterval);
+  }, []);
+
+  const loadNotificationUnreadCount = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      if (!token) { setNotificationUnreadCount(0); return; }
+      const response = await fetch(`${API_URL}/api/notifications?unread=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setNotificationUnreadCount(Number(data.unreadCount) || 0);
+    } catch (error) {
+      console.log('Unable to refresh notification count:', error.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadNotificationUnreadCount();
+    const notificationInterval = setInterval(loadNotificationUnreadCount, 60000);
+    return () => clearInterval(notificationInterval);
+  }, [loadNotificationUnreadCount]);
 
   const [events, setEvents] = useState([]);
-  const [attendance, setAttendance] = useState({
-    present: 0,
-    absent: 0,
-    percentage: 0,
-  });
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -227,27 +262,8 @@ export default function MainScreen({
             ? data.attendance
             : [];
 
-        const present = records.filter(
-          (item) =>
-            String(item.status || '').toLowerCase() ===
-            'present'
-        ).length;
+        setAttendanceRecords(records);
 
-        const absent = records.filter(
-          (item) =>
-            String(item.status || '').toLowerCase() ===
-            'absent'
-        ).length;
-
-        const total = present + absent;
-
-        setAttendance({
-          present,
-          absent,
-          percentage: total
-            ? Math.round((present / total) * 100)
-            : 0,
-        });
       }
     } catch (error) {
       console.log(
@@ -271,17 +287,51 @@ export default function MainScreen({
     setRefreshing(false);
   };
 
-  const upcomingEvent = events
-    .filter(
-      (event) =>
-        event?.date &&
-        new Date(event.date).getTime() >= Date.now()
-    )
-    .sort(
-      (a, b) =>
-        new Date(a.date) -
-        new Date(b.date)
-    )[0];
+  const getManilaDateKey = (value) => {
+    if (!value) return null;
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date(value));
+    const values = Object.fromEntries(
+      parts.map(({ type, value: partValue }) => [type, partValue])
+    );
+    return `${values.year}-${values.month}-${values.day}`;
+  };
+
+  const todayKey = getManilaDateKey(new Date());
+  const todayEvent = events
+    .filter((event) => event?.date && getManilaDateKey(event.date) === todayKey)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+
+  const upcomingEvent = todayEvent || events
+    .filter((event) => event?.date && getManilaDateKey(event.date) > todayKey)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+
+  const selectedEventDateKey = upcomingEvent?.date
+    ? getManilaDateKey(upcomingEvent.date)
+    : null;
+
+  const eventAttendanceRecords = upcomingEvent
+    ? attendanceRecords.filter((item) =>
+        item.eventId
+          ? item.eventId === upcomingEvent.id
+          : item.dateKey === selectedEventDateKey
+      )
+    : [];
+
+  const present = eventAttendanceRecords.filter(
+    (item) => String(item.status || '').toUpperCase() === 'PRESENT'
+  ).length;
+  const absent = eventAttendanceRecords.filter(
+    (item) => String(item.status || '').toUpperCase() === 'ABSENT'
+  ).length;
+  const markedTotal = present + absent;
+  const attendancePercentage = markedTotal
+    ? Math.round((present / markedTotal) * 100)
+    : 0;
 
   const eventDate = upcomingEvent?.date
     ? new Date(
@@ -341,15 +391,24 @@ export default function MainScreen({
             <TouchableOpacity
               style={styles.iconButton}
               onPress={() =>
-                navigation?.navigate?.('Events')
+                navigation?.navigate?.('Notifications')
               }
               activeOpacity={0.8}
             >
-              <Ionicons
-                name="notifications-outline"
-                size={21}
-                color={theme.notificationIcon}
-              />
+              <View>
+                <Ionicons
+                  name="notifications-outline"
+                  size={21}
+                  color={theme.notificationIcon}
+                />
+                {notificationUnreadCount > 0 && (
+                  <View style={styles.notificationBadge}>
+                    <Text style={styles.notificationBadgeText}>
+                      {notificationUnreadCount > 99 ? '99+' : notificationUnreadCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
             </TouchableOpacity>
           </View>
         </View>
@@ -366,7 +425,7 @@ export default function MainScreen({
 
           <View style={{ flex: 1 }}>
             <Text style={styles.greeting}>
-              Good day, {displayName}! 👋
+              {timeGreeting}, {displayName}! 👋
             </Text>
 
             <Text style={styles.subGreeting}>
@@ -489,7 +548,7 @@ export default function MainScreen({
             <Text style={styles.attendanceNumber}>
               {loading
                 ? '—'
-                : `${attendance.percentage}%`}
+                : `${attendancePercentage}%`}
             </Text>
 
             <Text style={styles.attendanceLabel}>
@@ -500,7 +559,7 @@ export default function MainScreen({
           <View style={styles.attendanceStats}>
             <View>
               <Text style={styles.present}>
-                {attendance.present}
+                {present}
               </Text>
 
               <Text style={styles.statLabel}>
@@ -510,7 +569,7 @@ export default function MainScreen({
 
             <View>
               <Text style={styles.absent}>
-                {attendance.absent}
+                {absent}
               </Text>
 
               <Text style={styles.statLabel}>
@@ -650,6 +709,25 @@ const createStyles = (theme) =>
       gap: 8,
     },
 
+    notificationBadge: {
+      position: 'absolute',
+      top: -7,
+      right: -9,
+      minWidth: 17,
+      height: 17,
+      paddingHorizontal: 3,
+      borderRadius: 9,
+      backgroundColor: '#E11D48',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: theme.background || theme.bg || '#FFFFFF',
+    },
+    notificationBadgeText: {
+      color: '#FFFFFF',
+      fontSize: 9,
+      fontWeight: '700',
+    },
     iconButton: {
       width: 40,
       height: 40,
