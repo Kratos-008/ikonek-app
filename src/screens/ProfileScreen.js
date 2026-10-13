@@ -76,12 +76,27 @@ export default function ProfileScreen({ user, navigation }) {
   };
 
   const saveProfile = async () => {
-    // Current backend exposes member updates as admin-only. Do not call that endpoint
-    // as a regular user; wait for the authenticated self-profile endpoint to be added.
-    Alert.alert(
-      'Profile editing not connected yet',
-      'Your backend currently restricts member updates to admins. We need to add a secure self-profile endpoint before saving edits safely.'
-    );
+    const normalizedName = String(name || '').trim().replace(/\s+/g, ' ');
+    if (!normalizedName) { Alert.alert('Name required', 'Please enter your name before saving.'); return; }
+    if (normalizedName.length > 100) { Alert.alert('Name too long', 'Please use 100 characters or fewer.'); return; }
+    setSaving(true);
+    try {
+      const token = await AsyncStorage.getItem('@ikonek_token');
+      if (!token) throw new Error('Please sign in again to update your profile.');
+      const response = await fetch(`${API_URL}/api/auth/profile`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: normalizedName }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.message || 'Could not update your name. Please try again.');
+      setName(data.user?.name || normalizedName);
+      setMember((current) => current ? { ...current, name: data.user?.name || normalizedName } : current);
+      setEditing(false);
+      Alert.alert('Profile updated', 'Your name has been updated successfully.');
+    } catch (error) {
+      Alert.alert('Could not save profile', error?.message || 'Please try again.');
+    } finally { setSaving(false); }
   };
 
   const initials = (name || user?.name || 'U').trim().split(/\s+/).slice(0, 2).map(p => p[0] || '').join('').toUpperCase();
@@ -126,11 +141,11 @@ export default function ProfileScreen({ user, navigation }) {
               <Text style={[s.fieldLabel, text]}>Name</Text>
               <TextInput value={name} onChangeText={setName} style={[s.input, text, { borderColor: colors.border }]} />
               <Text style={[s.fieldLabel, text]}>Email</Text>
-              <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" style={[s.input, text, { borderColor: colors.border }]} />
+              <TextInput value={email} editable={false} autoCapitalize="none" keyboardType="email-address" style={[s.input, text, { borderColor: colors.border, opacity: 0.7 }]} />
               <TouchableOpacity style={[s.action, { backgroundColor: '#64748b' }]} onPress={saveProfile} disabled={saving}>
                 <Text style={s.actionText}>{saving ? 'Saving…' : 'Save Changes'}</Text>
               </TouchableOpacity>
-              <Text style={[s.note, muted]}>Saving is intentionally disabled until a secure self-profile API is added to the backend.</Text>
+              <Text style={[s.note, muted]}>You can change your display name here. Email changes are handled separately to protect your account.</Text>
             </View>
           )}
           <TouchableOpacity style={[s.action, { backgroundColor: '#0F766E' }]} onPress={() => { setShowQr(v => !v); setEditing(false); }} disabled={!member}>

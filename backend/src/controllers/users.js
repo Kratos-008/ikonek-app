@@ -16,6 +16,30 @@ const userSelect = {
   updatedAt: true,
 };
 
+// Allow an authenticated user to change only their own display name.
+// Keep a linked YouthProfile name synchronized without changing identity or role.
+const updateOwnProfile = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    const name = req.body?.name;
+    if (!userId) return res.status(401).json({ success: false, message: "Please sign in again." });
+    if (typeof name !== "string" || !name.trim()) return res.status(400).json({ success: false, message: "Name cannot be empty." });
+    const normalizedName = name.normalize("NFKC").trim().replace(/\s+/g, " ");
+    if (normalizedName.length > 100) return res.status(400).json({ success: false, message: "Name must be 100 characters or fewer." });
+
+    const user = await prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.update({ where: { id: userId }, data: { name: normalizedName }, select: { id: true, name: true, email: true, role: true } });
+      await tx.youthProfile.updateMany({ where: { userId }, data: { name: normalizedName } });
+      return updatedUser;
+    });
+    return res.json({ success: true, message: "Profile name updated successfully.", user });
+  } catch (error) {
+    if (error?.code === "P2025") return res.status(404).json({ success: false, message: "User account not found." });
+    console.error("Update own profile error:", error);
+    return res.status(500).json({ success: false, message: "Could not update your name. Please try again." });
+  }
+};
+
 // Get all users
 const getUsers = async (req, res) => {
   try {
@@ -475,6 +499,7 @@ const deleteUser = async (req, res) => {
 
 module.exports = {
   getUsers,
+  updateOwnProfile,
   getUserById,
   createUser,
   updateUser,
