@@ -23,7 +23,7 @@ import { useTheme } from '../context/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
 
-const API_URL = 'http://192.168.1.48:5000'; // Local development server
+const API_URL = 'https://ikonek-app.onrender.com'; // Local development server
 
 // Alisin ang doble sa History: iisa lang ang pangalan kada petsa (yung pinakabago ang tinitira)
 const dedupeHistory = (list) => {

@@ -27,7 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Notifications from 'expo-notifications';
 
-const API_URL = 'http://192.168.1.48:5000';
+const API_URL = 'https://ikonek-app.onrender.com';
 const EVENT_REMINDER_STORAGE_KEY = '@ikonek_event_reminder_notifications';
 // Persist the button state separately from OS notification IDs. Notification IDs
 // can be missing/invalid after app reinstalls or OS cleanup, but the user's choice remains.

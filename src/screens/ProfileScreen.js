@@ -6,7 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 
-const API_URL = 'http://192.168.1.48:5000';
+const API_URL = 'https://ikonek-app.onrender.com';
 
 export default function ProfileScreen({ user, navigation }) {
   const { colors, isDarkMode } = useTheme();

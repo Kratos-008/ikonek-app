@@ -20,7 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
 import * as ImagePicker from 'expo-image-picker';
 
-const API_URL = 'http://192.168.1.48:5000';
+const API_URL = 'https://ikonek-app.onrender.com';
 
 export default function PrayerJournalScreen({ navigation }) {
   const { isDarkMode, colors } = useTheme();
