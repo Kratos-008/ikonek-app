@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 
-const API_URL = 'https://ikonek-app.onrender.com';
+const API_URL = 'http://192.168.1.48:5000';
 
 export function AdminDashboard({
   user,

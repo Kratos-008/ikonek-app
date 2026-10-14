@@ -93,7 +93,7 @@ const getPrayerRequests = async (req, res) => {
           { visibility: "CHURCH" },
         ],
       },
-      include: { user: { select: { id: true, name: true } } },
+      include: { user: { select: { id: true, name: true } }, reactions: { include: { user: { select: { id: true, name: true } } } }, comments: { include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } } },
       orderBy: { createdAt: "desc" },
     });
     return res.json({ success: true, prayerRequests });
@@ -219,4 +219,79 @@ const deletePrayerRequest = async (req, res) => {
   }
 };
 
-module.exports = { createPrayerRequest, getPrayerRequests, updatePrayerRequest, deletePrayerRequest };
+
+const VALID_REACTIONS = new Set(["HEART", "HAHA", "WOW", "SAD", "LIKE"]);
+
+const ensurePostVisible = async (postId, userId) => prisma.prayerRequest.findFirst({
+  where: { id: postId, OR: [{ userId }, { visibility: "CHURCH" }] },
+  select: { id: true, userId: true },
+});
+
+const setPrayerReaction = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const reaction = String(req.body.reaction || "").toUpperCase();
+    const post = await ensurePostVisible(id, req.user.userId);
+    if (!post) return res.status(404).json({ success: false, message: "Post not found" });
+    if (!VALID_REACTIONS.has(reaction)) return res.status(400).json({ success: false, message: "Invalid reaction" });
+    const existing = await prisma.prayerReaction.findUnique({ where: { postId_userId: { postId: id, userId: req.user.userId } } });
+    if (existing && existing.reaction === reaction) {
+      await prisma.prayerReaction.delete({ where: { id: existing.id } });
+      return res.json({ success: true, removed: true });
+    }
+    await prisma.prayerReaction.upsert({
+      where: { postId_userId: { postId: id, userId: req.user.userId } },
+      create: { postId: id, userId: req.user.userId, reaction },
+      update: { reaction },
+    });
+    if (post.userId && post.userId !== req.user.userId) {
+      await prisma.notification.create({ data: { userId: post.userId, type: "PRAYER_REACTION", title: "New reaction", message: "Someone reacted to your journal post.", relatedId: id } }).catch(e => console.error("Reaction notification error:", e.message));
+    }
+    return res.json({ success: true, reaction });
+  } catch (error) {
+    console.error("Set prayer reaction error:", error);
+    return res.status(500).json({ success: false, message: "Could not save reaction" });
+  }
+};
+
+const createPrayerComment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const content = typeof req.body.content === "string" ? req.body.content.trim() : "";
+    if (!content) return res.status(400).json({ success: false, message: "Comment cannot be empty" });
+    if (content.length > 2000) return res.status(400).json({ success: false, message: "Comment must be 2,000 characters or fewer" });
+    const post = await ensurePostVisible(id, req.user.userId);
+    if (!post) return res.status(404).json({ success: false, message: "Post not found" });
+    const comment = await prisma.prayerComment.create({ data: { postId: id, userId: req.user.userId, content }, include: { user: { select: { id: true, name: true } } } });
+    if (post.userId && post.userId !== req.user.userId) {
+      await prisma.notification.create({ data: { userId: post.userId, type: "PRAYER_COMMENT", title: "New comment", message: `${comment.user?.name || "Someone"} commented on your journal post.`, relatedId: id } }).catch(e => console.error("Comment notification error:", e.message));
+    }
+    return res.status(201).json({ success: true, comment });
+  } catch (error) {
+    console.error("Create prayer comment error:", error);
+    return res.status(500).json({ success: false, message: "Could not add comment" });
+  }
+};
+
+const updatePrayerComment = async (req, res) => {
+  try {
+    const content = typeof req.body.content === "string" ? req.body.content.trim() : "";
+    if (!content) return res.status(400).json({ success: false, message: "Comment cannot be empty" });
+    if (content.length > 2000) return res.status(400).json({ success: false, message: "Comment must be 2,000 characters or fewer" });
+    const existing = await prisma.prayerComment.findFirst({ where: { id: req.params.commentId, userId: req.user.userId } });
+    if (!existing) return res.status(404).json({ success: false, message: "Comment not found or you do not own it" });
+    const comment = await prisma.prayerComment.update({ where: { id: existing.id }, data: { content }, include: { user: { select: { id: true, name: true } } } });
+    return res.json({ success: true, comment });
+  } catch (error) { console.error("Update prayer comment error:", error); return res.status(500).json({ success: false, message: "Could not edit comment" }); }
+};
+
+const deletePrayerComment = async (req, res) => {
+  try {
+    const existing = await prisma.prayerComment.findFirst({ where: { id: req.params.commentId, userId: req.user.userId } });
+    if (!existing) return res.status(404).json({ success: false, message: "Comment not found or you do not own it" });
+    await prisma.prayerComment.delete({ where: { id: existing.id } });
+    return res.json({ success: true });
+  } catch (error) { console.error("Delete prayer comment error:", error); return res.status(500).json({ success: false, message: "Could not delete comment" }); }
+};
+
+module.exports = { createPrayerRequest, getPrayerRequests, updatePrayerRequest, deletePrayerRequest, setPrayerReaction, createPrayerComment, updatePrayerComment, deletePrayerComment };

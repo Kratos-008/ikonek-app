@@ -6,7 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 
-const API_URL = 'https://ikonek-app.onrender.com';
+const API_URL = 'http://192.168.1.48:5000';
 
 export default function ProfileScreen({ user, navigation }) {
   const { colors, isDarkMode } = useTheme();
@@ -48,27 +48,40 @@ export default function ProfileScreen({ user, navigation }) {
     }
 
     setDownloadingQr(true);
+    let fileUri;
     try {
-      // Load the native media-library module only when the user taps Save.
-      // This prevents a missing native module from crashing the app at startup.
-      const MediaLibrary = await import('expo-media-library');
-      const permission = await MediaLibrary.requestPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission needed', 'Allow photo-library access to save your member QR code to your device.');
-        return;
-      }
-
       const base64 = await new Promise((resolve, reject) => {
+        if (typeof qrRef.current?.toDataURL !== 'function') {
+          reject(new Error('The QR image is not ready yet. Please close and reopen the QR code, then try again.'));
+          return;
+        }
         qrRef.current.toDataURL((data) => {
           if (data) resolve(data);
           else reject(new Error('Could not generate the QR image.'));
         });
       });
-      const fileUri = `${FileSystem.cacheDirectory}ikonek-member-qr-${member.id}.png`;
-      await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-      await MediaLibrary.saveToLibraryAsync(fileUri);
-      Alert.alert('QR Code saved', 'Your member QR code has been saved to your device gallery.');
+
+      fileUri = `${FileSystem.cacheDirectory}ikonek-member-qr-${member.id}.png`;
+      await FileSystem.writeAsStringAsync(fileUri, base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // Avoid ExpoMediaLibrary entirely because this app build does not contain
+      // its native module. Use the system share sheet to save/share the PNG.
+      const Sharing = await import('expo-sharing');
+      if (typeof Sharing.isAvailableAsync !== 'function' ||
+          typeof Sharing.shareAsync !== 'function' ||
+          !(await Sharing.isAvailableAsync())) {
+        throw new Error('Sharing is not available in this app build. Install expo-sharing and rebuild the app.');
+      }
+
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'image/png',
+        dialogTitle: 'Save your iKonek member QR code',
+        UTI: 'public.png',
+      });
     } catch (error) {
+      console.error('Save member QR code error:', error);
       Alert.alert('Could not save QR Code', error?.message || 'Please try again.');
     } finally {
       setDownloadingQr(false);

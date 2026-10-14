@@ -20,7 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
 import * as ImagePicker from 'expo-image-picker';
 
-const API_URL = 'https://ikonek-app.onrender.com';
+const API_URL = 'http://192.168.1.48:5000';
 
 export default function PrayerJournalScreen({ navigation }) {
   const { isDarkMode, colors } = useTheme();
@@ -40,6 +40,9 @@ export default function PrayerJournalScreen({ navigation }) {
   const [editingRequestId, setEditingRequestId] = useState(null);
   const [searchText, setSearchText] = useState('');
   const [listFilter, setListFilter] = useState('ALL');
+  const [commentDrafts, setCommentDrafts] = useState({});
+  const [commentEditDrafts, setCommentEditDrafts] = useState({});
+  const [editingCommentId, setEditingCommentId] = useState(null);
 
   // Load the currently logged-in account.
   const loadLoggedInUser = useCallback(async () => {
@@ -394,6 +397,41 @@ export default function PrayerJournalScreen({ navigation }) {
       Alert.alert('Save Failed', error.message || 'Could not save testimony.');
     }
   };
+
+  const sendPostAction = async (postId, path, method, body) => {
+    const token = await AsyncStorage.getItem('@ikonek_token');
+    if (!token) throw new Error('Please sign in again.');
+    const response = await fetch(`${API_URL}/api/prayer/${postId}${path}`, {
+      method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Action failed');
+    return data;
+  };
+
+  const handleReact = async (request, reaction) => {
+    try { await sendPostAction(request.id, '/reaction', 'PUT', { reaction }); await loadPrayerRequests(); }
+    catch (e) { Alert.alert('Reaction Failed', e.message); }
+  };
+
+  const handleAddComment = async (request) => {
+    const content = (commentDrafts[request.id] || '').trim();
+    if (!content) return;
+    try { await sendPostAction(request.id, '/comments', 'POST', { content }); setCommentDrafts(old => ({ ...old, [request.id]: '' })); await loadPrayerRequests(); }
+    catch (e) { Alert.alert('Comment Failed', e.message); }
+  };
+
+  const handleSaveComment = async (requestId, commentId) => {
+    const content = (commentEditDrafts[commentId] || '').trim();
+    if (!content) { Alert.alert('Comment Required', 'Please enter a comment.'); return; }
+    try { await sendPostAction(requestId, `/comments/${commentId}`, 'PUT', { content }); setEditingCommentId(null); await loadPrayerRequests(); }
+    catch (e) { Alert.alert('Edit Failed', e.message); }
+  };
+
+  const handleDeleteComment = (requestId, commentId) => Alert.alert('Delete Comment', 'Are you sure you want to delete this comment?', [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Delete', style: 'destructive', onPress: async () => { try { await sendPostAction(requestId, `/comments/${commentId}`, 'DELETE'); await loadPrayerRequests(); } catch (e) { Alert.alert('Delete Failed', e.message); } } },
+  ]);
 
   // Load an existing post into the form. Answered prayer requests are locked.
   const handleEditRequest = (request) => {
@@ -941,6 +979,33 @@ export default function PrayerJournalScreen({ navigation }) {
                   {request.content}
                 </Text>
 
+                <View style={styles.socialSection}>
+                  <Text style={styles.socialHeading}>Reactions</Text>
+                  <View style={styles.reactionRow}>
+                    {[
+                      { key: 'HEART', emoji: '❤️', label: 'Heart' },
+                      { key: 'HAHA', emoji: '😂', label: 'Haha' },
+                      { key: 'WOW', emoji: '😮', label: 'Wow' },
+                      { key: 'SAD', emoji: '😢', label: 'Sad' },
+                      { key: 'LIKE', emoji: '👍', label: 'Like' },
+                    ].map((item) => {
+                      const count = (request.reactions || []).filter((r) => r.reaction === item.key).length;
+                      const mine = (request.reactions || []).some((r) => String(r.userId) === String(currentUserId) && r.reaction === item.key);
+                      return <TouchableOpacity key={item.key} style={[styles.reactionChip, mine && styles.reactionChipActive]} onPress={() => handleReact(request, item.key)}><Text style={styles.reactionText}>{item.emoji} {count || ''}</Text></TouchableOpacity>;
+                    })}
+                  </View>
+                  <Text style={styles.socialHeading}>Comments ({(request.comments || []).length})</Text>
+                  {(request.comments || []).map((comment) => (
+                    <View key={comment.id} style={styles.commentCard}>
+                      <Text style={styles.commentAuthor}>{comment.user?.name || 'User'}</Text>
+                      {editingCommentId === comment.id ? <><TextInput style={styles.commentInput} value={commentEditDrafts[comment.id] ?? comment.content} onChangeText={(v) => setCommentEditDrafts(old => ({ ...old, [comment.id]: v }))} multiline /><View style={styles.commentActions}><TouchableOpacity onPress={() => handleSaveComment(request.id, comment.id)}><Text style={styles.commentActionText}>Save</Text></TouchableOpacity><TouchableOpacity onPress={() => setEditingCommentId(null)}><Text style={styles.commentCancelText}>Cancel</Text></TouchableOpacity></View></> : <Text style={styles.commentContent}>{comment.content}</Text>}
+                      {String(comment.userId) === String(currentUserId) && editingCommentId !== comment.id && <View style={styles.commentActions}><TouchableOpacity onPress={() => { setCommentEditDrafts(old => ({ ...old, [comment.id]: comment.content })); setEditingCommentId(comment.id); }}><Text style={styles.commentActionText}>Edit</Text></TouchableOpacity><TouchableOpacity onPress={() => handleDeleteComment(request.id, comment.id)}><Text style={styles.commentDeleteText}>Delete</Text></TouchableOpacity></View>}
+                    </View>
+                  ))}
+                  <TextInput style={styles.commentInput} placeholder="Write a comment..." placeholderTextColor={colors.muted || '#64748B'} value={commentDrafts[request.id] || ''} onChangeText={(v) => setCommentDrafts(old => ({ ...old, [request.id]: v }))} multiline maxLength={2000} />
+                  <TouchableOpacity style={styles.commentSendButton} onPress={() => handleAddComment(request)}><Text style={styles.commentSendText}>Post Comment</Text></TouchableOpacity>
+                </View>
+
                 {imageUrl && (
                   <Image
                     source={{ uri: imageUrl }}
@@ -1098,6 +1163,22 @@ const createStyles = (isDarkMode, colors) => StyleSheet.create({
   filterButtonActive: { backgroundColor: isDarkMode ? '#1E3A8A' : '#DBEAFE', borderColor: '#60A5FA' },
   filterButtonText: { color: colors.text, fontSize: 12, fontWeight: '700' },
   filterButtonTextActive: { color: isDarkMode ? '#FFFFFF' : '#1D4ED8' },
+  socialSection: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  socialHeading: { color: colors.text, fontSize: 14, fontWeight: '800', marginTop: 7, marginBottom: 8 },
+  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  reactionChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: colors.card },
+  reactionChipActive: { borderColor: '#60A5FA', backgroundColor: isDarkMode ? '#1E3A5F' : '#DBEAFE' },
+  reactionText: { color: colors.text, fontSize: 14 },
+  commentCard: { padding: 10, borderRadius: 10, backgroundColor: isDarkMode ? '#111827' : '#F8FAFC', marginBottom: 8 },
+  commentAuthor: { color: colors.text, fontSize: 13, fontWeight: '800', marginBottom: 3 },
+  commentContent: { color: colors.text, fontSize: 14, lineHeight: 20 },
+  commentInput: { minHeight: 42, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 10, color: colors.text, marginTop: 5, marginBottom: 7 },
+  commentActions: { flexDirection: 'row', gap: 16, marginTop: 7 },
+  commentActionText: { color: '#3B82F6', fontWeight: '700' },
+  commentCancelText: { color: colors.muted || '#64748B', fontWeight: '600' },
+  commentDeleteText: { color: '#EF4444', fontWeight: '700' },
+  commentSendButton: { alignSelf: 'flex-end', backgroundColor: '#2563EB', paddingVertical: 9, paddingHorizontal: 14, borderRadius: 9 },
+  commentSendText: { color: '#FFFFFF', fontWeight: '800' },
   cardActions: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   editButton: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9, backgroundColor: isDarkMode ? '#1E3A8A' : '#DBEAFE' },
   editButtonText: { color: isDarkMode ? '#DBEAFE' : '#1D4ED8', fontSize: 12, fontWeight: '800' },

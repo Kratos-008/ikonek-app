@@ -31,7 +31,16 @@
       "expo-font",
       "expo-secure-store",
       "expo-video",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-sharing",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#000000",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200
+        }
+      ]
     ],
     "extra": {
       "eas": {

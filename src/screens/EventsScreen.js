@@ -25,8 +25,47 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
+import * as Notifications from 'expo-notifications';
 
-const API_URL = 'https://ikonek-app.onrender.com';
+const API_URL = 'http://192.168.1.48:5000';
+const EVENT_REMINDER_STORAGE_KEY = '@ikonek_event_reminder_notifications';
+// Persist the button state separately from OS notification IDs. Notification IDs
+// can be missing/invalid after app reinstalls or OS cleanup, but the user's choice remains.
+const EVENT_REMINDER_STATE_KEY = '@ikonek_event_reminder_state';
+
+const readReminderMap = async (key) => {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeReminderMap = async (key, value) => {
+  await AsyncStorage.setItem(key, JSON.stringify(value));
+};
+
+// Show notifications while the app is open as well as when it is in the background.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+const getEventDateForReminder = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  // Date-only values should remind at 9:00 AM local time, rather than midnight.
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    date.setHours(9, 0, 0, 0);
+  }
+  return date;
+};
 
 // Older events may still contain the original generic welcome message.
 // Treat that legacy default as empty so it does not appear as if it were
@@ -170,17 +209,26 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
         );
       }
 
+      const [savedReminders, savedReminderState] = await Promise.all([
+        readReminderMap(EVENT_REMINDER_STORAGE_KEY),
+        readReminderMap(EVENT_REMINDER_STATE_KEY),
+      ]);
+
       setEvents(
         Array.isArray(data.events)
-          ? data.events.map((event) => ({
-            ...event,
-            attendees: Array.isArray(
-              event.attendees
-            )
-              ? event.attendees
-              : [],
-            reminderSet: false,
-          }))
+          ? data.events.map((event) => {
+            const eventKey = String(event.id);
+            // The state map is authoritative; the notification list is a fallback
+            // for reminders created before this state key existed.
+            const reminderSet = Object.prototype.hasOwnProperty.call(savedReminderState, eventKey)
+              ? savedReminderState[eventKey] === true
+              : Array.isArray(savedReminders[eventKey]) && savedReminders[eventKey].length > 0;
+            return {
+              ...event,
+              attendees: Array.isArray(event.attendees) ? event.attendees : [],
+              reminderSet,
+            };
+          })
           : []
       );
     } catch (error) {
@@ -371,29 +419,116 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
     );
   };
 
-  const handleToggleReminder = (id) => {
-    setEvents((current) =>
-      current.map((event) => {
-        if (event.id !== id) return event;
+  const handleToggleReminder = async (id) => {
+    const event = events.find((item) => String(item.id) === String(id));
+    if (!event) return;
 
-        const newStatus =
-          !event.reminderSet;
+    const savedReminders = await readReminderMap(EVENT_REMINDER_STORAGE_KEY);
+    const savedReminderState = await readReminderMap(EVENT_REMINDER_STATE_KEY);
 
-        Alert.alert(
-          newStatus
-            ? 'Reminder Set'
-            : 'Reminder Removed',
-          newStatus
-            ? `You will be reminded for "${event.title}".`
-            : `Reminder cancelled for "${event.title}".`
-        );
+    if (event.reminderSet) {
+      const existingIds = savedReminders[String(id)] || [];
+      await Promise.all(existingIds.map(async (notificationId) => {
+        try {
+          await Notifications.cancelScheduledNotificationAsync(notificationId);
+        } catch (error) {
+          console.warn('Could not cancel event reminder:', error);
+        }
+      }));
+      delete savedReminders[String(id)];
+      delete savedReminderState[String(id)];
+      await Promise.all([
+        writeReminderMap(EVENT_REMINDER_STORAGE_KEY, savedReminders),
+        writeReminderMap(EVENT_REMINDER_STATE_KEY, savedReminderState),
+      ]);
 
-        return {
-          ...event,
-          reminderSet: newStatus,
-        };
-      })
-    );
+      setEvents((current) => current.map((item) =>
+        String(item.id) === String(id) ? { ...item, reminderSet: false } : item
+      ));
+      Alert.alert('Reminder Removed', `Reminders cancelled for "${event.title}".`);
+      return;
+    }
+
+    try {
+      const eventDate = getEventDateForReminder(event.date);
+      if (!eventDate || eventDate <= new Date()) {
+        Alert.alert('Reminder Unavailable', 'This event has already started or its date is invalid.');
+        return;
+      }
+
+      const permission = await Notifications.getPermissionsAsync();
+      let status = permission.status;
+      if (status !== 'granted') {
+        const requested = await Notifications.requestPermissionsAsync();
+        status = requested.status;
+      }
+      if (status !== 'granted') {
+        Alert.alert('Notifications Disabled', 'Allow notifications for iKonek in your phone settings to receive event reminders.');
+        return;
+      }
+
+      const triggers = [
+        { date: new Date(eventDate.getTime() - 24 * 60 * 60 * 1000), message: 'is tomorrow!' },
+        { date: eventDate, message: 'is today!' },
+      ].filter((item) => item.date > new Date());
+
+      if (!triggers.length) {
+        Alert.alert('Reminder Unavailable', 'There are no future reminders left for this event.');
+        return;
+      }
+
+      const notificationIds = [];
+      for (const reminder of triggers) {
+        const notificationId = await Notifications.scheduleNotificationAsync({
+          content: {
+            title: `Event Reminder: ${event.title}`,
+            body: `${event.title} ${reminder.message}`,
+            data: { eventId: String(event.id), eventTitle: event.title },
+            sound: 'default',
+          },
+          trigger: reminder.date,
+        });
+        notificationIds.push(notificationId);
+      }
+
+      savedReminders[String(id)] = notificationIds;
+      savedReminderState[String(id)] = true;
+      await Promise.all([
+        writeReminderMap(EVENT_REMINDER_STORAGE_KEY, savedReminders),
+        writeReminderMap(EVENT_REMINDER_STATE_KEY, savedReminderState),
+      ]);
+
+      // Save a persistent in-app notification when the user SETS the reminder.
+      // Local phone reminders still work if the bell API is temporarily unavailable.
+      try {
+        const token = await AsyncStorage.getItem('@ikonek_token');
+        if (token) {
+          const bellResponse = await fetch(`${API_URL}/api/notifications/event-reminders`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ eventId: String(event.id) }),
+          });
+          if (!bellResponse.ok) {
+            const bellData = await bellResponse.json().catch(() => ({}));
+            console.warn('Could not save event reminder to notification bell:', bellData.message || bellResponse.status);
+          }
+        }
+      } catch (bellError) {
+        console.warn('Could not save event reminder to notification bell:', bellError?.message || bellError);
+      }
+      setEvents((current) => current.map((item) =>
+        String(item.id) === String(id) ? { ...item, reminderSet: true } : item
+      ));
+      Alert.alert('Reminder Set', triggers.length === 2
+        ? `You'll be notified one day before and on the day of "${event.title}".`
+        : `You'll be notified on the day of "${event.title}".`);
+    } catch (error) {
+      console.error('Set event reminder error:', error);
+      Alert.alert('Reminder Error', 'Unable to schedule this reminder. Please check notification permissions and try again.');
+    }
   };
 
   const toPickerDate = (value) => {
@@ -547,10 +682,20 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
       });
       const data = await response.json();
       if (response.ok && data?.event) {
-        setSelectedEvent(data.event);
+        // Keep the locally stored reminder state when the API refreshes event details.
+        const existingEvent = events.find(
+          (item) => String(item.id) === String(data.event.id)
+        );
+        setSelectedEvent({
+          ...(existingEvent || {}),
+          ...data.event,
+          reminderSet: Boolean(existingEvent?.reminderSet),
+        });
         setEvents((currentEvents) =>
           currentEvents.map((item) =>
-            item.id === data.event.id ? { ...item, ...data.event } : item
+            String(item.id) === String(data.event.id)
+              ? { ...item, ...data.event, reminderSet: Boolean(item.reminderSet) }
+              : item
           )
         );
       }
@@ -616,7 +761,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not sign up for this event.');
       setSelectedEvent(data.event);
-      setEvents((current) => current.map((event) => event.id === data.event.id ? { ...event, ...data.event } : event));
+      setEvents((current) => current.map((event) => String(event.id) === String(data.event.id) ? { ...event, ...data.event, reminderSet: Boolean(event.reminderSet) } : event));
       Alert.alert('Signed Up', `You are signed up for ${selectedEvent.title}.`);
     } catch (error) {
       Alert.alert('Event Signup', error.message || 'Could not sign up for this event.');
@@ -673,7 +818,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not register the selected youth.');
       setSelectedEvent(data.event);
-      setEvents((current) => current.map((event) => event.id === data.event.id ? { ...event, ...data.event } : event));
+      setEvents((current) => current.map((event) => String(event.id) === String(data.event.id) ? { ...event, ...data.event, reminderSet: Boolean(event.reminderSet) } : event));
       setSignupModalVisible(false);
       Alert.alert('Signup Saved', 'The selected youth have been signed up. Attendance has not been marked.');
     } catch (error) {
@@ -1184,9 +1329,15 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
                   />
                   <Text style={styles.flowPreviewHeading}>Flow of Program</Text>
                 </View>
-                <Text style={styles.flowPreviewText}>
-                  {item.flowOfProgram || 'No flow of program provided yet.'}
-                </Text>
+                <ScrollView
+                  style={styles.flowPreviewScroll}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                >
+                  <Text style={styles.flowPreviewText}>
+                    {item.flowOfProgram || 'No flow of program provided yet.'}
+                  </Text>
+                </ScrollView>
               </View>
 
               <View
@@ -1299,6 +1450,13 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
           <View
             style={styles.modalContent}
           >
+            <ScrollView
+              style={styles.detailsModalScroll}
+              contentContainerStyle={styles.detailsModalScrollContent}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+            >
             {selectedEvent && (
               <>
                 <Text
@@ -1485,6 +1643,7 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
                 </TouchableOpacity>
               </>
             )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -2250,10 +2409,14 @@ const createStyles = (colors, isDarkMode, primary) =>
       backgroundColor: isDarkMode ? '#111C2F' : '#F8FAFC',
       borderColor: isDarkMode ? '#334155' : '#D5DEE8',
       borderWidth: 1,
-      borderRadius: 15,
-      paddingHorizontal: 13,
-      paddingVertical: 12,
-      marginTop: 8,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      marginTop: 6,
+    },
+
+    flowPreviewScroll: {
+      maxHeight: 110,
     },
 
     flowPreviewHeadingRow: {
@@ -2400,12 +2563,20 @@ const createStyles = (colors, isDarkMode, primary) =>
     modalContent: {
       backgroundColor: colors.card,
       borderRadius: 12,
-      padding: 20,
+      padding: 14,
       borderWidth: 1,
       borderColor: colors.border,
       width: '100%',
-      maxHeight: '100%',
+      maxHeight: '90%',
       flexShrink: 1,
+    },
+
+    detailsModalScroll: {
+      flexShrink: 1,
+    },
+
+    detailsModalScrollContent: {
+      paddingBottom: 8,
     },
 
     editModalScrollView: {

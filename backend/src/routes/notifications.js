@@ -147,6 +147,51 @@ router.post(
 );
 
 // =====================================================
+// YOUTH/LEADER: SAVE AN EVENT REMINDER TO THE IN-APP BELL
+// POST /api/notifications/event-reminders
+// =====================================================
+router.post("/event-reminders", async (req, res) => {
+  try {
+    const eventId = typeof req.body.eventId === "string" ? req.body.eventId.trim() : "";
+    if (!eventId) {
+      return res.status(400).json({ success: false, message: "Event ID is required." });
+    }
+
+    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) {
+      return res.status(404).json({ success: false, message: "Event not found." });
+    }
+
+    const existing = await prisma.notification.findFirst({
+      where: {
+        userId: req.user.id,
+        type: "EVENT_REMINDER",
+        relatedId: event.id,
+        readAt: null,
+      },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      await prisma.notification.create({
+        data: {
+          userId: req.user.id,
+          type: "EVENT_REMINDER",
+          title: "Event reminder set",
+          message: `You'll be reminded about "${event.title}" before the event and on the event day.`,
+          relatedId: event.id,
+        },
+      });
+    }
+
+    return res.status(201).json({ success: true, message: "Event reminder saved to notifications." });
+  } catch (error) {
+    console.error("Save event reminder notification failed:", error);
+    return res.status(500).json({ success: false, message: "Unable to save event reminder notification." });
+  }
+});
+
+// =====================================================
 // GET THE SIGNED-IN USER'S NOTIFICATIONS
 // GET /api/notifications
 // GET /api/notifications?unread=true

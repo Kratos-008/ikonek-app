@@ -7,6 +7,10 @@ const {
   getPrayerRequests,
   updatePrayerRequest,
   deletePrayerRequest,
+  setPrayerReaction,
+  createPrayerComment,
+  updatePrayerComment,
+  deletePrayerComment,
 } = require("../controllers/prayer");
 
 const { authenticateToken } = require("../middleware/auth");
@@ -31,5 +35,9 @@ router.put(
 );
 
 router.delete("/:id", authenticateToken, deletePrayerRequest);
+router.put("/:id/reaction", authenticateToken, setPrayerReaction);
+router.post("/:id/comments", authenticateToken, createPrayerComment);
+router.put("/:id/comments/:commentId", authenticateToken, updatePrayerComment);
+router.delete("/:id/comments/:commentId", authenticateToken, deletePrayerComment);
 
 module.exports = router;
