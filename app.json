@@ -2,6 +2,7 @@
   "expo": {
     "name": "iKonek",
     "slug": "ikonek",
+    "owner": "daemon_running",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -44,7 +45,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "79ede572-6ce7-46a3-bb85-0a67ab24fb1e"
+        "projectId": "a906849a-146c-4bfa-9f33-4b1fdccd1697"
       }
     }
   }
