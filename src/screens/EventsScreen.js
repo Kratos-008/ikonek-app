@@ -1127,15 +1127,42 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
     }
   };
 
-  const filteredEvents = events.filter(
-    (event) => {
-      return (
-        selectedStatus === 'All' ||
-        getEventStatus(event.date) ===
-        selectedStatus
-      );
-    }
-  );
+  // Keep the event-status filters, but show the most relevant events first:
+  // Today -> Upcoming (nearest first) -> Past (most recent first).
+  const filteredEvents = events
+    .filter((event) => (
+      selectedStatus === 'All' ||
+      getEventStatus(event.date) === selectedStatus
+    ))
+    .sort((a, b) => {
+      const statusOrder = {
+        Today: 0,
+        Upcoming: 1,
+        Past: 2,
+      };
+
+      const statusA = getEventStatus(a.date);
+      const statusB = getEventStatus(b.date);
+      const statusDifference =
+        statusOrder[statusA] - statusOrder[statusB];
+
+      if (statusDifference !== 0) {
+        return statusDifference;
+      }
+
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+
+      // Invalid/missing dates stay safely at the end of their status group.
+      const safeDateA = Number.isNaN(dateA) ? 0 : dateA;
+      const safeDateB = Number.isNaN(dateB) ? 0 : dateB;
+
+      // Today and Upcoming: nearest event first.
+      // Past: most recently held event first.
+      return statusA === 'Past'
+        ? safeDateB - safeDateA
+        : safeDateA - safeDateB;
+    });
 
   return (
     <SafeAreaView style={styles.container}>
