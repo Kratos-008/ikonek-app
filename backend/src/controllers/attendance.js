@@ -308,18 +308,24 @@ const finalizeAttendance = async (req, res) => {
       }
     }
 
-    const created = absentRows.length
-      ? await prisma.attendance.createMany({ data: absentRows, skipDuplicates: true })
-      : { count: 0 };
+    // Apply the finalization writes together. For Admins, set the event lock in
+    // the same transaction as creating the missing ABSENT records so the event
+    // cannot be left half-finalized if one database operation fails.
+    const transactionResults = await prisma.$transaction(async (tx) => {
+      const created = absentRows.length
+        ? await tx.attendance.createMany({ data: absentRows, skipDuplicates: true })
+        : { count: 0 };
 
-    // Only an Admin can finalize the entire event. A Leader finalizes only
-    // their assigned members and leaves the event open for other leaders.
-    if (isAdmin) {
-      await prisma.event.update({
-        where: { id: event.id },
-        data: { attendanceFinalized: true },
-      });
-    }
+      if (isAdmin) {
+        await tx.event.update({
+          where: { id: event.id },
+          data: { attendanceFinalized: true },
+        });
+      }
+
+      return { created };
+    });
+    const created = transactionResults.created;
 
     return res.json({
       success: true,

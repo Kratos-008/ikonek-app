@@ -362,6 +362,19 @@ export default function AttendanceScreen({ navigation }) {
               );
               const data = await response.json();
               if (!response.ok) throw new Error(data.message || 'Unable to finalize attendance.');
+
+              // Immediately reflect the server-confirmed finalization in this
+              // screen, then reload the canonical event/attendance state.
+              if (isAdmin && data.eventFinalized) {
+                setEventsList((current) => current.map((event) =>
+                  event.id === eventToFinalize.id
+                    ? { ...event, attendanceFinalized: true }
+                    : event
+                ));
+                setActiveEvent((current) =>
+                  current?.id === eventToFinalize.id ? null : current
+                );
+              }
               Alert.alert('Attendance Finalized', data.message || 'Attendance was finalized successfully.');
               await loadYouthFromDatabase();
             } catch (error) {
