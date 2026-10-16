@@ -244,10 +244,12 @@ const finalizeAttendance = async (req, res) => {
 
     const eventDateKey = getManilaDateKey(event.date);
     const todayKey = getManilaDateKey();
-    if (eventDateKey >= todayKey) {
+    // Allow finalization on the event date, including while the gathering is
+    // still in progress. Do not allow a future-dated event to be finalized.
+    if (eventDateKey > todayKey) {
       return res.status(400).json({
         success: false,
-        message: "Attendance can only be finalized after the event date has passed.",
+        message: "Attendance cannot be finalized before the event date.",
       });
     }
 

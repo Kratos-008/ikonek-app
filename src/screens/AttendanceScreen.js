@@ -203,7 +203,10 @@ export default function AttendanceScreen({ navigation }) {
   const getActiveEventFromList = (events = []) => {
     const todayKey = getTodayDateKey();
     return [...events]
-      .filter(event => getEventDateKey(event.date) === todayKey)
+      .filter(event =>
+        getEventDateKey(event.date) === todayKey &&
+        !event.attendanceFinalized
+      )
       .sort((a, b) => new Date(a.date) - new Date(b.date))[0] || null;
   };
 
