@@ -62,6 +62,8 @@ model YouthProfile {
   address    String?
   cellLeader String?
   category   String?
+  // Manually assigned attendance timer level, independent of Newbie/Regular category.
+  timerLevel String?
 
   // Admin-approved role for this member once they create an account.
   accountRole MemberRole @default(YOUTH)

@@ -22,6 +22,7 @@ const youthSelect = {
   address: true,
   cellLeader: true,
   category: true,
+  timerLevel: true,
   accountRole: true,
   image: true,
   createdAt: true,
@@ -250,6 +251,7 @@ const updateYouth = async (req, res) => {
       address,
       cellLeader,
       category,
+      timerLevel,
       image,
       accountRole,
     } = req.body;
@@ -362,6 +364,18 @@ const updateYouth = async (req, res) => {
       } else {
         updateData.category = category;
       }
+    }
+
+    // Manual timer level is independent of the Newbie/Regular category.
+    if (timerLevel !== undefined) {
+      const allowedTimerLevels = ["First Timer", "Second Timer", "Third Timer", "Regular"];
+      if (timerLevel !== null && timerLevel !== "" && !allowedTimerLevels.includes(timerLevel)) {
+        return res.status(400).json({
+          success: false,
+          message: "Timer level must be First Timer, Second Timer, Third Timer, or Regular",
+        });
+      }
+      updateData.timerLevel = timerLevel === "" ? null : timerLevel;
     }
 
     // Image
