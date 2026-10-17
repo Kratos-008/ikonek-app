@@ -282,9 +282,11 @@ const finalizeAttendance = async (req, res) => {
       return isRegistered && isAssignedToLeader;
     });
 
-    // Preserve every existing record. Only create ABSENT records for unmarked
-    // registered attendees; skipDuplicates protects the youthId/dateKey unique constraint.
+    // Registered attendees must end up with a definitive status. Preserve
+    // existing PRESENT/ABSENT records, convert existing UNMARKED/PENDING (or
+    // other non-final statuses) to ABSENT, and create ABSENT only when no row exists.
     const absentRows = [];
+    const existingUnmarkedIds = [];
     for (const youth of youthProfiles) {
       const existing = await prisma.attendance.findUnique({
         where: {
@@ -293,7 +295,7 @@ const finalizeAttendance = async (req, res) => {
             dateKey: eventDateKey,
           },
         },
-        select: { id: true },
+        select: { id: true, status: true },
       });
 
       if (!existing) {
@@ -305,15 +307,26 @@ const finalizeAttendance = async (req, res) => {
           dateKey: eventDateKey,
           status: "ABSENT",
         });
+      } else if (!["PRESENT", "ABSENT"].includes(String(existing.status || "").toUpperCase())) {
+        existingUnmarkedIds.push(existing.id);
       }
     }
 
-    // Apply the finalization writes together. For Admins, set the event lock in
-    // the same transaction as creating the missing ABSENT records so the event
-    // cannot be left half-finalized if one database operation fails.
+    // Apply all status changes and (for Admins) the global event lock atomically.
     const transactionResults = await prisma.$transaction(async (tx) => {
       const created = absentRows.length
         ? await tx.attendance.createMany({ data: absentRows, skipDuplicates: true })
+        : { count: 0 };
+
+      const updated = existingUnmarkedIds.length
+        ? await tx.attendance.updateMany({
+            where: { id: { in: existingUnmarkedIds } },
+            data: {
+              status: "ABSENT",
+              eventId: event.id,
+              attendanceDate: dateFromKey(eventDateKey),
+            },
+          })
         : { count: 0 };
 
       if (isAdmin) {
@@ -323,16 +336,19 @@ const finalizeAttendance = async (req, res) => {
         });
       }
 
-      return { created };
+      return { created, updated };
     });
     const created = transactionResults.created;
+    const updated = transactionResults.updated;
 
     return res.json({
       success: true,
       message: isAdmin
         ? "Event attendance finalized. Unmarked registered attendees were recorded as absent."
         : "Your assigned registered attendees' attendance was finalized. Existing records were preserved.",
-      finalizedMembers: created.count,
+      finalizedMembers: created.count + updated.count,
+      createdAbsentRecords: created.count,
+      updatedAbsentRecords: updated.count,
       eventFinalized: isAdmin,
     });
   } catch (error) {
