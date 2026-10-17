@@ -1484,192 +1484,196 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
               nestedScrollEnabled
               keyboardShouldPersistTaps="handled"
             >
-            {selectedEvent && (
-              <>
-                <Text
-                  style={styles.modalTitle}
-                >
-                  {selectedEvent.title}
-                </Text>
-
-                <Text
-                  style={styles.sectionHeader}
-                >
-                  📜 Flow of Program:
-                </Text>
-
-                <View
-                  style={styles.boxContent}
-                >
+              {selectedEvent && (
+                <>
                   <Text
-                    style={styles.boxText}
+                    style={styles.modalTitle}
                   >
-                    {selectedEvent.flowOfProgram ||
-                      'No flow of program provided yet.'}
+                    {selectedEvent.title}
                   </Text>
-                </View>
 
-                <Text
-                  style={styles.sectionHeader}
-                >
-                  👥 Signed-Up Attendees (
-                  {Array.isArray(
-                    selectedEvent.attendees
-                  )
-                    ? selectedEvent.attendees
-                      .length
-                    : 0}
-                  ):
-                </Text>
-
-                {(() => {
-                  const signedUpAttendees = Array.isArray(selectedEvent.attendees)
-                    ? selectedEvent.attendees
-                    : [];
-                  const attendanceCounts = signedUpAttendees.reduce(
-                    (counts, name) => {
-                      const status = getAttendeeAttendanceStatus(selectedEvent, name);
-                      counts[status] = (counts[status] || 0) + 1;
-                      return counts;
-                    },
-                    { Present: 0, Absent: 0, 'Not Yet Marked': 0 }
-                  );
-
-                  return (
-                    <>
-                      <View style={styles.boxContent}>
-                        <Text style={styles.boxText}>
-                          Signed Up: {signedUpAttendees.length}
-                        </Text>
-                        <Text style={styles.boxText}>
-                          Present: {attendanceCounts.Present}
-                        </Text>
-                        <Text style={styles.boxText}>
-                          Absent: {attendanceCounts.Absent}
-                        </Text>
-                        <Text style={styles.boxText}>
-                          Not Yet Marked: {attendanceCounts['Not Yet Marked']}
-                        </Text>
-                      </View>
-
-                      <View style={[styles.boxContent, { marginTop: 8 }]}>
-                        {signedUpAttendees.length ? (
-                          signedUpAttendees.map((name, index) => {
-                            const status = getAttendeeAttendanceStatus(selectedEvent, name);
-                            return (
-                              <Text key={`${name}-${index}`} style={styles.boxText}>
-                                • {name} — {status}
-                              </Text>
-                            );
-                          })
-                        ) : (
-                          <Text style={styles.boxText}>
-                            No attendees signed up yet.
-                          </Text>
-                        )}
-                      </View>
-                    </>
-                  );
-                })()}
-
-                {canSignUpForEvent(selectedEvent) && ['USER', 'YOUTH'].includes(String(currentUser?.role || '').toUpperCase()) && (
-                  hasCurrentUserSignedUp(selectedEvent) ? (
-                    <View style={[styles.signupActionBtn, { opacity: 0.8 }]}>
-                      <Text style={styles.btnText}>✅ Already Signed Up</Text>
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={[styles.signupActionBtn, { opacity: signupSaving ? 0.65 : 1 }]}
-                      onPress={handleYouthSelfSignup}
-                      disabled={signupSaving}
-                    >
-                      <Text style={styles.btnText}>{signupSaving ? 'Signing Up...' : '✅ Sign Up for Event'}</Text>
-                    </TouchableOpacity>
-                  )
-                )}
-
-                {canSignUpForEvent(selectedEvent) && String(currentUser?.role || '').toUpperCase() === 'LEADER' && (
-                  <TouchableOpacity
-                    style={styles.signupActionBtn}
-                    onPress={openLeaderSignup}
-                    disabled={signupLoading || signupSaving}
+                  <Text
+                    style={styles.sectionHeader}
                   >
-                    <Text style={styles.btnText}>{signupLoading ? 'Loading Youth...' : '👥 Sign Up Assigned Youth'}</Text>
-                  </TouchableOpacity>
-                )}
+                    📜 Flow of Program:
+                  </Text>
 
-                <TouchableOpacity
-                  style={
-                    styles.printModalBtn
-                  }
-                  onPress={() =>
-                    handlePrintFlow(
-                      selectedEvent
+                  <View
+                    style={styles.boxContent}
+                  >
+                    <Text
+                      style={styles.boxText}
+                    >
+                      {selectedEvent.flowOfProgram ||
+                        'No flow of program provided yet.'}
+                    </Text>
+                  </View>
+
+                  <Text
+                    style={styles.sectionHeader}
+                  >
+                    👥 Signed-Up Attendees (
+                    {Array.isArray(
+                      selectedEvent.attendees
                     )
-                  }
-                >
-                  <Text style={styles.btnText}>
-                    🖨️ Print / Export Flow
+                      ? selectedEvent.attendees
+                        .length
+                      : 0}
+                    ):
                   </Text>
-                </TouchableOpacity>
 
-                {isAdmin && (
-                  <>
+                  {(() => {
+                    const signedUpAttendees = Array.isArray(selectedEvent.attendees)
+                      ? selectedEvent.attendees
+                      : [];
+                    const attendanceCounts = signedUpAttendees.reduce(
+                      (counts, name) => {
+                        const status = getAttendeeAttendanceStatus(selectedEvent, name);
+                        counts[status] = (counts[status] || 0) + 1;
+                        return counts;
+                      },
+                      { Present: 0, Absent: 0, 'Not Yet Marked': 0 }
+                    );
+
+                    return (
+                      <>
+                        <View style={styles.boxContent}>
+                          <Text style={styles.boxText}>
+                            Signed Up: {signedUpAttendees.length}
+                          </Text>
+                          <Text style={styles.boxText}>
+                            Present: {attendanceCounts.Present}
+                          </Text>
+                          <Text style={styles.boxText}>
+                            Absent: {attendanceCounts.Absent}
+                          </Text>
+                          <Text style={styles.boxText}>
+                            Not Yet Marked: {attendanceCounts['Not Yet Marked']}
+                          </Text>
+                        </View>
+
+                        <ScrollView
+                          style={[styles.boxContent, { marginTop: 8, maxHeight: 220 }]}
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator
+                        >
+                          {signedUpAttendees.length ? (
+                            signedUpAttendees.map((name, index) => {
+                              const status = getAttendeeAttendanceStatus(selectedEvent, name);
+                              return (
+                                <Text key={`${name}-${index}`} style={styles.boxText}>
+                                  • {name} — {status}
+                                </Text>
+                              );
+                            })
+                          ) : (
+                            <Text style={styles.boxText}>
+                              No attendees signed up yet.
+                            </Text>
+                          )}
+                        </ScrollView>
+                      </>
+                    );
+                  })()}
+
+                  {canSignUpForEvent(selectedEvent) && ['USER', 'YOUTH'].includes(String(currentUser?.role || '').toUpperCase()) && (
+                    hasCurrentUserSignedUp(selectedEvent) ? (
+                      <View style={[styles.signupActionBtn, { opacity: 0.8 }]}>
+                        <Text style={styles.btnText}>✅ Already Signed Up</Text>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={[styles.signupActionBtn, { opacity: signupSaving ? 0.65 : 1 }]}
+                        onPress={handleYouthSelfSignup}
+                        disabled={signupSaving}
+                      >
+                        <Text style={styles.btnText}>{signupSaving ? 'Signing Up...' : '✅ Sign Up for Event'}</Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+
+                  {canSignUpForEvent(selectedEvent) && String(currentUser?.role || '').toUpperCase() === 'LEADER' && (
                     <TouchableOpacity
-                      style={
-                        styles.editModalBtn
-                      }
-                      onPress={() => {
-                        setModalVisible(false);
-                        handleOpenEdit(
-                          selectedEvent
-                        );
-                      }}
+                      style={styles.signupActionBtn}
+                      onPress={openLeaderSignup}
+                      disabled={signupLoading || signupSaving}
                     >
-                      <Text
+                      <Text style={styles.btnText}>{signupLoading ? 'Loading Youth...' : '👥 Sign Up Assigned Youth'}</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity
+                    style={
+                      styles.printModalBtn
+                    }
+                    onPress={() =>
+                      handlePrintFlow(
+                        selectedEvent
+                      )
+                    }
+                  >
+                    <Text style={styles.btnText}>
+                      🖨️ Print / Export Flow
+                    </Text>
+                  </TouchableOpacity>
+
+                  {isAdmin && (
+                    <>
+                      <TouchableOpacity
                         style={
-                          styles.btnText
+                          styles.editModalBtn
+                        }
+                        onPress={() => {
+                          setModalVisible(false);
+                          handleOpenEdit(
+                            selectedEvent
+                          );
+                        }}
+                      >
+                        <Text
+                          style={
+                            styles.btnText
+                          }
+                        >
+                          ✏️ Edit Event
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={
+                          styles.deleteModalBtn
+                        }
+                        onPress={() =>
+                          handleDeleteEvent(
+                            selectedEvent
+                          )
                         }
                       >
-                        ✏️ Edit Event
-                      </Text>
-                    </TouchableOpacity>
+                        <Text
+                          style={
+                            styles.btnText
+                          }
+                        >
+                          🗑️ Delete Event
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
 
-                    <TouchableOpacity
-                      style={
-                        styles.deleteModalBtn
-                      }
-                      onPress={() =>
-                        handleDeleteEvent(
-                          selectedEvent
-                        )
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.btnText
-                        }
-                      >
-                        🗑️ Delete Event
-                      </Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-
-                <TouchableOpacity
-                  style={
-                    styles.closeModalBtn
-                  }
-                  onPress={() =>
-                    setModalVisible(false)
-                  }
-                >
-                  <Text style={styles.btnText}>
-                    Close
-                  </Text>
-                </TouchableOpacity>
-              </>
-            )}
+                  <TouchableOpacity
+                    style={
+                      styles.closeModalBtn
+                    }
+                    onPress={() =>
+                      setModalVisible(false)
+                    }
+                  >
+                    <Text style={styles.btnText}>
+                      Close
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </ScrollView>
           </View>
         </View>

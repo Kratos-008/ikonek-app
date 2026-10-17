@@ -325,10 +325,23 @@ export default function MainScreen({
   const present = eventAttendanceRecords.filter(
     (item) => String(item.status || '').toUpperCase() === 'PRESENT'
   ).length;
-  const absent = eventAttendanceRecords.filter(
+  const recordedAbsent = eventAttendanceRecords.filter(
     (item) => String(item.status || '').toUpperCase() === 'ABSENT'
   ).length;
-  const markedTotal = present + absent;
+
+  // Once an event is finalized, every registered attendee must have a final
+  // status. Use the event's attendee list as the denominator so missing or
+  // stale attendance rows cannot leave the dashboard incorrectly at 100%.
+  const registeredAttendeeCount = Array.isArray(upcomingEvent?.attendees)
+    ? upcomingEvent.attendees.length
+    : 0;
+  const finalizedAbsent = upcomingEvent?.attendanceFinalized
+    ? Math.max(recordedAbsent, registeredAttendeeCount - present, 0)
+    : recordedAbsent;
+  const absent = finalizedAbsent;
+  const markedTotal = upcomingEvent?.attendanceFinalized
+    ? Math.max(registeredAttendeeCount, present + absent)
+    : present + absent;
   const attendancePercentage = markedTotal
     ? Math.round((present / markedTotal) * 100)
     : 0;

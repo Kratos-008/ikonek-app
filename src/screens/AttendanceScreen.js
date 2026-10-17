@@ -51,6 +51,8 @@ export default function AttendanceScreen({ navigation }) {
 
   const [regularList, setRegularList] = useState([]);
   const [newbieList, setNewbieList] = useState([]);
+  // Manual timer-level overrides are device-local until backend/schema support is added.
+  const [timerLevelOverrides, setTimerLevelOverrides] = useState({});
   const [eventsList, setEventsList] = useState([]);
   const [activeEvent, setActiveEvent] = useState(null);
   const [attendanceHistory, setAttendanceHistory] = useState([]);
@@ -213,16 +215,16 @@ export default function AttendanceScreen({ navigation }) {
   const getPresentRecordsForYouth = (records, youthId) =>
     records.filter(r => r.youthId === youthId && String(r.status).toUpperCase() === 'PRESENT');
 
-  const formatYouth = (item, records = [], currentEvent = null) => {
+  const formatYouth = (item, records = [], currentEvent = null, levelOverrides = {}) => {
     const category = item.category || 'Newbie';
     const youthRecords = getPresentRecordsForYouth(records, item.id);
     const recordedCount = youthRecords.length;
     const manualTimerLevels = { 'First Timer': 1, 'Second Timer': 2, 'Third Timer': 3 };
-    const isRegular = category === 'Regular';
-    // The saved category keeps a manually selected timer level across reloads.
-    // Legacy records still fall back to the number of historical PRESENT records.
-    const count = Object.prototype.hasOwnProperty.call(manualTimerLevels, category)
-      ? manualTimerLevels[category]
+    const overrideLevel = levelOverrides[item.id];
+    const isRegular = category === 'Regular' || overrideLevel === 'Regular';
+    // Manual timer levels are stored locally on this device; otherwise use server attendance history.
+    const count = overrideLevel && Object.prototype.hasOwnProperty.call(manualTimerLevels, overrideLevel)
+      ? manualTimerLevels[overrideLevel]
       : recordedCount;
     const todayKey = getTodayDateKey();
     const todayRecord = currentEvent
@@ -239,7 +241,7 @@ export default function AttendanceScreen({ navigation }) {
       cellLeader: item.cellLeader || 'N/A',
       invitedBy: 'N/A',
       dateFilledOut: item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
-      status: isRegular ? 'Regular' : (manualTimerLevels[category] ? category : getNewbieStatusLabel(Math.min(4, count))),
+      status: isRegular ? 'Regular' : (overrideLevel && manualTimerLevels[overrideLevel] ? overrideLevel : getNewbieStatusLabel(Math.min(4, count))),
       presentCountNumber: Math.min(4, count),
       presentCount: `${Math.min(4, count)} / 4`,
       isPresent: !!todayRecord,
@@ -310,8 +312,15 @@ export default function AttendanceScreen({ navigation }) {
       setAttendanceRecords(attendance);
       setAttendanceHistory(dedupeHistory(attendance.filter(r => String(r.status).toUpperCase() === 'PRESENT').map(formatHistoryRecord)));
 
+      let savedLevelOverrides = {};
+      try {
+        savedLevelOverrides = JSON.parse((await AsyncStorage.getItem('@ikonek_timer_level_overrides')) || '{}');
+      } catch (storageError) {
+        console.warn('Could not read saved timer-level overrides:', storageError);
+      }
+      setTimerLevelOverrides(savedLevelOverrides);
       const records = Array.isArray(youthData.youth)
-        ? youthData.youth.map(item => formatYouth(item, attendance, currentEvent))
+        ? youthData.youth.map(item => formatYouth(item, attendance, currentEvent, savedLevelOverrides))
         : [];
       setRegularList(records.filter(x => x.status === 'Regular'));
       setNewbieList(records.filter(x => x.status !== 'Regular'));
@@ -390,7 +399,7 @@ export default function AttendanceScreen({ navigation }) {
 
   // Attendance is now stored in Neon through /api/attendance. This remains only
   // as a compatibility no-op for the friend's UI handlers; it never writes local storage.
-  const saveDataToStorage = async () => {};
+  const saveDataToStorage = async () => { };
 
   const recordAttendance = async (youthId) => {
     const token = await getAuthToken();
@@ -473,33 +482,21 @@ export default function AttendanceScreen({ navigation }) {
     return 'First Timer';
   };
 
-  // Manually set and persist a timer level immediately. This uses the existing
-  // YouthProfile category field, so no database migration is needed.
+  // Store manual timer level locally. The current API accepts only Newbie/Regular,
+  // so sending First/Second/Third Timer as category would be rejected by the backend.
   const persistTimerLevel = async (member, category, label) => {
     try {
-      const token = await getAuthToken();
-      if (!token) throw new Error('Please sign in again and try once more.');
-      const response = await fetch(`${API_URL}/api/youth/${member.id}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: member.name,
-          gender: member.sex === 'N/A' ? null : member.sex,
-          age: Number(member.age) || null,
-          birthday: member.birthday === 'N/A' ? null : member.birthday,
-          address: member.address === 'N/A' ? null : member.address,
-          cellLeader: member.cellLeader || 'N/A',
-          category,
-          image: member.photo || null,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Could not update the timer level.');
+      const nextOverrides = { ...timerLevelOverrides, [member.id]: category };
+      await AsyncStorage.setItem('@ikonek_timer_level_overrides', JSON.stringify(nextOverrides));
+      setTimerLevelOverrides(nextOverrides);
       await loadYouthFromDatabase();
-      Alert.alert('Timer Level Updated', `${member.name} is now ${label}.`);
+      Alert.alert(
+        'Timer Level Updated',
+        `${member.name} is now ${label}. This manual level is saved on this device only; the server database was not changed.`
+      );
     } catch (error) {
       console.error('Manual timer level update error:', error);
-      Alert.alert('Update Failed', error.message || 'Could not update the timer level.');
+      Alert.alert('Update Failed', error.message || 'Could not save the timer level on this device.');
     }
   };
 
@@ -551,13 +548,17 @@ export default function AttendanceScreen({ navigation }) {
           birthday: member.birthday === 'N/A' ? null : member.birthday,
           address: member.address === 'N/A' ? null : member.address,
           cellLeader: member.cellLeader || 'N/A',
-          category: nextCategory,
+          category: newCount >= 4 ? 'Regular' : 'Newbie',
           image: member.photo || null,
         }),
       });
       const levelData = await levelResponse.json();
       if (!levelResponse.ok) throw new Error(levelData.message || 'Attendance was saved, but the timer level could not update.');
 
+      const nextOverrides = { ...timerLevelOverrides };
+      delete nextOverrides[id];
+      await AsyncStorage.setItem('@ikonek_timer_level_overrides', JSON.stringify(nextOverrides));
+      setTimerLevelOverrides(nextOverrides);
       await loadYouthFromDatabase();
       if (newCount >= 4) {
         Alert.alert('Congratulations! 🎉', `${member.name} has completed 4/4 attendance and is now a Regular Member.`);
@@ -807,7 +808,7 @@ export default function AttendanceScreen({ navigation }) {
   };
 
 
-  const saveLeadersToStorage = async () => {};
+  const saveLeadersToStorage = async () => { };
 
   // Members ng leader = mga Regular na ang Cell Leader ay kapareho ng pangalan ng leader
   const getLeaderMembers = (leader) =>
@@ -1132,9 +1133,7 @@ export default function AttendanceScreen({ navigation }) {
       birthday: birthday.trim() || null,
       address: address.trim() || null,
       cellLeader: isAddingRegular ? (cellLeader.trim() || 'N/A') : 'N/A',
-      category: isAddingRegular
-        ? 'Regular'
-        : (isEditing ? (newbieList.find(member => member.id === editId)?.status || 'Newbie') : 'Newbie'),
+      category: isAddingRegular ? 'Regular' : 'Newbie',
       image: photo || null,
     };
 
@@ -1889,23 +1888,25 @@ export default function AttendanceScreen({ navigation }) {
                 <TouchableOpacity onPress={() => {
                   Alert.alert("Clear History", "Are you sure you want to clear all attendance logs?", [
                     { text: "Cancel", style: "cancel" },
-                    { text: "Clear", style: "destructive", onPress: async () => {
-                      try {
-                        const token = await getAuthToken();
-                        if (!token) return;
-                        const response = await fetch(`${API_URL}/api/attendance/clear/all`, {
-                          method: 'DELETE',
-                          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                        });
-                        const data = await response.json();
-                        if (!response.ok) throw new Error(data.message || 'Failed to clear attendance history.');
-                        await loadYouthFromDatabase();
-                        Alert.alert('Cleared', 'Attendance history was cleared from Neon.');
-                      } catch (error) {
-                        console.error('Clear attendance history error:', error);
-                        Alert.alert('Database Error', error.message || 'Unable to clear attendance history.');
+                    {
+                      text: "Clear", style: "destructive", onPress: async () => {
+                        try {
+                          const token = await getAuthToken();
+                          if (!token) return;
+                          const response = await fetch(`${API_URL}/api/attendance/clear/all`, {
+                            method: 'DELETE',
+                            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                          });
+                          const data = await response.json();
+                          if (!response.ok) throw new Error(data.message || 'Failed to clear attendance history.');
+                          await loadYouthFromDatabase();
+                          Alert.alert('Cleared', 'Attendance history was cleared from Neon.');
+                        } catch (error) {
+                          console.error('Clear attendance history error:', error);
+                          Alert.alert('Database Error', error.message || 'Unable to clear attendance history.');
+                        }
                       }
-                    }}
+                    }
                   ]);
                 }}>
                   <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 12 }}>Clear All</Text>
@@ -2449,9 +2450,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 6,
   },
-  eventAttendanceBanner:{padding:12,borderRadius:10,borderWidth:1,marginBottom:12},
-  eventAttendanceTitle:{fontSize:12,fontWeight:'bold',marginBottom:4},
-  eventAttendanceText:{fontSize:12},
+  eventAttendanceBanner: { padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
+  eventAttendanceTitle: { fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
+  eventAttendanceText: { fontSize: 12 },
   activeTabBtn: {
     backgroundColor: '#3B82F6',
   },
@@ -2599,36 +2600,57 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 8,
-    marginTop: 10,
+    marginTop: 12,
   },
   deleteBtn: {
     backgroundColor: '#7F1D1D',
+    paddingVertical: 12,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 85,
   },
   editBtn: {
     backgroundColor: '#1E3A8A',
+    paddingVertical: 12,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 100,
   },
   presentBtn: {
     backgroundColor: '#374151',
+    paddingVertical: 12,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 110,
   },
   undoBtn: {
     backgroundColor: '#B45309',
+    paddingVertical: 12,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 85,
   },
   activePresentBtn: {
-    backgroundColor: '#059669',
+    backgroundColor: '#16A34A',
   },
   btnText: {
     color: '#FFF',
