@@ -220,7 +220,8 @@ export default function AttendanceScreen({ navigation }) {
     const youthRecords = getPresentRecordsForYouth(records, item.id);
     const recordedCount = youthRecords.length;
     const manualTimerLevels = { 'First Timer': 1, 'Second Timer': 2, 'Third Timer': 3 };
-    const overrideLevel = levelOverrides[item.id];
+    // Prefer the server value; use a local override only for legacy offline values.
+    const overrideLevel = item.timerLevel || levelOverrides[item.id];
     const isRegular = category === 'Regular' || overrideLevel === 'Regular';
     // Manual timer levels are stored locally on this device; otherwise use server attendance history.
     const count = overrideLevel && Object.prototype.hasOwnProperty.call(manualTimerLevels, overrideLevel)
@@ -482,21 +483,29 @@ export default function AttendanceScreen({ navigation }) {
     return 'First Timer';
   };
 
-  // Store manual timer level locally. The current API accepts only Newbie/Regular,
-  // so sending First/Second/Third Timer as category would be rejected by the backend.
-  const persistTimerLevel = async (member, category, label) => {
+  // Save manual timer level to the server, separate from the Newbie/Regular category.
+  const persistTimerLevel = async (member, timerLevel, label) => {
     try {
-      const nextOverrides = { ...timerLevelOverrides, [member.id]: category };
+      const token = await getAuthToken();
+      if (!token) throw new Error('Your session has expired. Please log in again.');
+      const response = await fetch(`${API_URL}/api/youth/${member.id}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timerLevel }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'The server could not save the timer level.');
+
+      // Clear any old device-only override so the server value takes precedence.
+      const nextOverrides = { ...timerLevelOverrides };
+      delete nextOverrides[member.id];
       await AsyncStorage.setItem('@ikonek_timer_level_overrides', JSON.stringify(nextOverrides));
       setTimerLevelOverrides(nextOverrides);
       await loadYouthFromDatabase();
-      Alert.alert(
-        'Timer Level Updated',
-        `${member.name} is now ${label}. This manual level is saved on this device only; the server database was not changed.`
-      );
+      Alert.alert('Timer Level Updated', `${member.name} is now ${label}. The timer level was saved to the server.`);
     } catch (error) {
       console.error('Manual timer level update error:', error);
-      Alert.alert('Update Failed', error.message || 'Could not save the timer level on this device.');
+      Alert.alert('Update Failed', error.message || 'Could not save the timer level to the server.');
     }
   };
 
