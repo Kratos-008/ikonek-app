@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "433980133438",
+    "project_id": "ikonek-c79db",
+    "storage_bucket": "ikonek-c79db.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:433980133438:android:c330e4d90a6d4e1785416f",
+        "android_client_info": {
+          "package_name": "com.ikonek.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB3Z4gg9tzXuxU3f8UD0iz2Ezas7D63cmo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

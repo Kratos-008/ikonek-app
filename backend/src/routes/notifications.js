@@ -4,11 +4,43 @@ const {
   authenticateToken,
   requireAdmin,
 } = require("../middleware/auth");
+const { sendPushToUsers } = require("../lib/push");
 
 const router = express.Router();
 
 // All notification routes require a signed-in user.
 router.use(authenticateToken);
+
+// Associate the signed-in user with this app installation's Expo push token.
+router.post("/device-token", async (req, res) => {
+  const token = typeof req.body.token === "string" ? req.body.token.trim() : "";
+  const platform = typeof req.body.platform === "string" ? req.body.platform : "unknown";
+  if (!token.startsWith("ExponentPushToken[") && !token.startsWith("ExpoPushToken[")) {
+    return res.status(400).json({ success: false, message: "A valid Expo push token is required." });
+  }
+  try {
+    await prisma.pushToken.upsert({
+      where: { token },
+      create: { token, platform, userId: req.user.id },
+      update: { platform, userId: req.user.id },
+    });
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Register push token failed:", error);
+    return res.status(500).json({ success: false, message: "Unable to register this device." });
+  }
+});
+
+router.delete("/device-token", async (req, res) => {
+  const token = typeof req.body.token === "string" ? req.body.token.trim() : "";
+  try {
+    if (token) await prisma.pushToken.deleteMany({ where: { token, userId: req.user.id } });
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Remove push token failed:", error);
+    return res.status(500).json({ success: false, message: "Unable to remove this device." });
+  }
+});
 
 // =====================================================
 // ADMIN: SEND CHURCH-WIDE ANNOUNCEMENT
@@ -49,6 +81,9 @@ router.post("/announcements", requireAdmin, async (req, res) => {
           title,
           message,
         })),
+      });
+      await sendPushToUsers(recipients.map((user) => user.id), {
+        type: "ANNOUNCEMENT", title, message,
       });
     }
 
@@ -127,6 +162,12 @@ router.post(
             message: `Reminder: ${event.title} is coming up. Please check the event details and your signup.`,
             relatedId: event.id,
           })),
+        });
+        await sendPushToUsers(userIds, {
+          type: "ATTENDANCE_REMINDER",
+          title: "Attendance reminder",
+          message: `Reminder: ${event.title} is coming up. Please check the event details and your signup.`,
+          relatedId: event.id,
         });
       }
 

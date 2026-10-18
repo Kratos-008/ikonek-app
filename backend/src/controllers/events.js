@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { sendPushToUsers } = require("../lib/push");
 
 async function notifyLinkedMembers(type, title, message, relatedId) {
   try {
@@ -6,7 +7,10 @@ async function notifyLinkedMembers(type, title, message, relatedId) {
       where: { role: { in: ["YOUTH", "LEADER"] } },
       select: { id: true },
     });
-    if (users.length) await prisma.notification.createMany({ data: users.map(({ id }) => ({ userId: id, type, title, message, relatedId: relatedId || null })) });
+    if (users.length) {
+      await prisma.notification.createMany({ data: users.map(({ id }) => ({ userId: id, type, title, message, relatedId: relatedId || null })) });
+      await sendPushToUsers(users.map(({ id }) => id), { type, title, message, relatedId });
+    }
   } catch (error) {
     // Notification failure must not undo a successful event save.
     console.error("Event notification error:", error.message);
@@ -130,7 +134,11 @@ const signupForEvent = async (req, res) => {
     if (addedNames.length) {
       try {
         const recipients = profiles.filter((profile) => addedNames.some((name) => name.toLowerCase() === String(profile.name || "").trim().toLowerCase()) && profile.userId);
-        if (recipients.length) await prisma.notification.createMany({ data: recipients.map((profile) => ({ userId: profile.userId, type: "EVENT_SIGNUP", title: "Event signup confirmed", message: `Your signup for ${event.title} is confirmed.`, relatedId: event.id })) });
+        if (recipients.length) {
+          const message = `Your signup for ${event.title} is confirmed.`;
+          await prisma.notification.createMany({ data: recipients.map((profile) => ({ userId: profile.userId, type: "EVENT_SIGNUP", title: "Event signup confirmed", message, relatedId: event.id })) });
+          await sendPushToUsers(recipients.map(({ userId }) => userId), { type: "EVENT_SIGNUP", title: "Event signup confirmed", message, relatedId: event.id });
+        }
       } catch (notificationError) { console.error("Event signup notification error:", notificationError.message); }
     }
     return res.json({

@@ -9,7 +9,8 @@ import {
   TextInput,
   Alert,
   Image,
-  Dimensions
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -21,9 +22,14 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../context/ThemeContext';
 
-const { width, height } = Dimensions.get('window');
+const API_URL = 'https://ikonek-app.onrender.com'; // Production server (Render)
 
-const API_URL = 'https://ikonek-app.onrender.com'; // Local development server
+// Leader profile details (sex, age, birthday, address, contact) are kept on this device
+// until the backend has a leaders endpoint.
+const LEADERS_KEY = '@ikonek_leader_profiles';
+
+// Flip to true once the backend /api/youth accepts an `invitedBy` field.
+const SERVER_SUPPORTS_INVITED_BY = false;
 
 // Alisin ang doble sa History: iisa lang ang pangalan kada petsa (yung pinakabago ang tinitira)
 const dedupeHistory = (list) => {
@@ -128,16 +134,26 @@ export default function AttendanceScreen({ navigation }) {
     return isToday;
   };
 
+  const parseBirthday = (value) => {
+    if (!value || value === 'N/A') return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  // Age is computed from the birthday when it can be parsed; otherwise falls back to the stored age.
   const getDisplayAge = (ageStr, birthdayStr) => {
+    const bday = parseBirthday(birthdayStr);
+    if (bday) {
+      const today = new Date();
+      let years = today.getFullYear() - bday.getFullYear();
+      const monthDiff = today.getMonth() - bday.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < bday.getDate())) years -= 1;
+      if (years >= 0 && years < 130) return `${years}`;
+    }
     if (!ageStr) return '';
     const matches = String(ageStr).match(/\d+/);
     if (!matches) return ageStr;
-
-    let baseAge = parseInt(matches[0], 10);
-    if (isBirthdayToday(birthdayStr)) {
-      baseAge += 1;
-    }
-    return `${baseAge}`;
+    return `${parseInt(matches[0], 10)}`;
   };
 
   // Petsa ngayong araw (parehong format ng History logs)
@@ -243,7 +259,7 @@ export default function AttendanceScreen({ navigation }) {
       birthday: item.birthday || 'N/A',
       address: item.address || 'N/A',
       cellLeader: item.cellLeader || 'N/A',
-      invitedBy: 'N/A',
+      invitedBy: item.invitedBy || 'N/A',
       dateFilledOut: item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
       status: isRegular ? 'Regular' : (overrideLevel && manualTimerLevels[overrideLevel] ? overrideLevel : getNewbieStatusLabel(Math.min(4, count))),
       presentCountNumber: Math.min(4, count),
@@ -254,6 +270,13 @@ export default function AttendanceScreen({ navigation }) {
       attendanceRecordId: todayRecord?.id || null,
       photo: item.image || null,
     };
+  };
+
+  const formatDateKey = (key) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(key || ''));
+    if (!m) return '';
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+      .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
   const formatHistoryRecord = (record) => {
@@ -268,22 +291,11 @@ export default function AttendanceScreen({ navigation }) {
       birthday: youth.birthday || 'N/A',
       address: youth.address || 'N/A',
       leaderOrInvited: youth.category === 'Regular' ? (youth.cellLeader || 'N/A') : 'N/A',
-      date: record.dateKey || new Date(record.attendanceDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      dateKey: record.dateKey || '',
+      date: formatDateKey(record.dateKey) || new Date(record.attendanceDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       time: new Date(record.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
       statusValue: record.status,
     };
-  };
-
-  const loadAttendanceFromDatabase = async (token) => {
-    const response = await fetch(`${API_URL}/api/attendance`, {
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.message || 'Failed to load attendance.');
-    const records = Array.isArray(data.attendance) ? data.attendance : [];
-    setAttendanceRecords(records);
-    setAttendanceHistory(dedupeHistory(records.filter(r => String(r.status).toUpperCase() === 'PRESENT').map(formatHistoryRecord)));
-    return records;
   };
 
   const loadYouthFromDatabase = async () => {
@@ -333,16 +345,32 @@ export default function AttendanceScreen({ navigation }) {
       setRegularList(records.filter(x => x.status === 'Regular'));
       setNewbieList(records.filter(x => x.status !== 'Regular'));
 
-      const leaders = [];
-      const seen = new Set();
+      // Leaders = saved profiles (this device) merged with names found in members' Cell Leader.
+      let storedLeaders = [];
+      try {
+        const raw = await AsyncStorage.getItem(LEADERS_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        storedLeaders = Array.isArray(parsed) ? parsed : [];
+      } catch (storageError) {
+        console.log('Failed to read leader profiles', storageError);
+      }
+      const leaderMap = new Map();
+      storedLeaders.forEach(l => {
+        const key = normalizeName(l.name);
+        if (!key || key === 'n/a') return;
+        leaderMap.set(key, {
+          sex: 'N/A', age: 'N/A', birthday: 'N/A', address: 'N/A', contact: 'N/A',
+          ...l,
+          id: `leader-${key}`,
+        });
+      });
       records.filter(x => x.status === 'Regular').forEach(x => {
         const nm = String(x.cellLeader || '').trim();
         const key = normalizeName(nm);
-        if (!nm || key === 'n/a' || seen.has(key)) return;
-        seen.add(key);
-        leaders.push({ id: `leader-${key}`, name: nm, sex: 'N/A', age: 'N/A', birthday: 'N/A', address: 'N/A', contact: 'N/A' });
+        if (!nm || key === 'n/a' || leaderMap.has(key)) return;
+        leaderMap.set(key, { id: `leader-${key}`, name: nm, sex: 'N/A', age: 'N/A', birthday: 'N/A', address: 'N/A', contact: 'N/A' });
       });
-      setLeadersList(leaders);
+      setLeadersList([...leaderMap.values()]);
     } catch (e) {
       console.error('Load Neon data error:', e);
       Alert.alert('Database Error', e.message || 'Unable to load youth, events and attendance from the server.');
@@ -405,10 +433,6 @@ export default function AttendanceScreen({ navigation }) {
     );
   };
 
-  // Attendance is now stored in Neon through /api/attendance. This remains only
-  // as a compatibility no-op for the friend's UI handlers; it never writes local storage.
-  const saveDataToStorage = async () => { };
-
   const recordAttendance = async (youthId) => {
     const token = await getAuthToken();
     if (!token) return false;
@@ -447,28 +471,36 @@ export default function AttendanceScreen({ navigation }) {
     return true;
   };
 
+  // Save the picture itself (data URI), not a device-only file:// path, so it shows on every device.
+  const assetToDataUri = (asset) =>
+    asset?.base64
+      ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`
+      : (asset?.uri || null);
+
   const handleTakePhoto = async () => {
     let result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.5,
+      quality: 0.4,
+      base64: true,
     });
 
     if (!result.canceled) {
-      setPhoto(result.assets[0].uri);
+      setPhoto(assetToDataUri(result.assets[0]));
     }
   };
 
   const handlePickFromGallery = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.5,
+      quality: 0.4,
+      base64: true,
     });
 
     if (!result.canceled) {
-      setPhoto(result.assets[0].uri);
+      setPhoto(assetToDataUri(result.assets[0]));
     }
   };
 
@@ -627,12 +659,38 @@ export default function AttendanceScreen({ navigation }) {
   // (Third Timer -> Second Timer, atbp.). Naka-uncheck na rin siya sa All list.
   const handleUndoNewbiePresent = (item) => {
     if (!isAdmin) return;
+    const prevCount = Math.max(0, (item.presentCountNumber || 0) - 1);
+    const prevLevel = getNewbieStatusLabel(prevCount);
     Alert.alert(
       "Undo Present",
-      `Ibabalik si ${item.name} sa ${Math.max(0, (item.presentCountNumber || 0) - 1)} / 4. Tuloy?`,
+      `Ibabalik si ${item.name} sa ${prevCount} / 4 (${prevLevel}). Tuloy?`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Undo", style: "destructive", onPress: () => handleUncheckPresent(item) }
+        {
+          text: "Undo",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await removeTodayAttendance(item.id);
+              // Also roll the saved timer level back, otherwise the old level keeps winning.
+              const token = await getAuthToken();
+              if (!token) throw new Error('Attendance was removed, but your session expired before the timer level could be rolled back.');
+              const response = await fetch(`${API_URL}/api/youth/${item.id}`, {
+                method: 'PUT',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ timerLevel: prevLevel }),
+              });
+              const data = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(data.message || 'Attendance was removed, but the timer level could not be rolled back.');
+              await loadYouthFromDatabase();
+              Alert.alert("Undo Complete", `${item.name} is back to ${prevLevel} (${prevCount}/4).`);
+            } catch (error) {
+              console.error('Undo present error:', error);
+              Alert.alert('Attendance Error', error.message || 'Unable to undo attendance.');
+              await loadYouthFromDatabase();
+            }
+          },
+        },
       ]
     );
   };
@@ -682,7 +740,7 @@ export default function AttendanceScreen({ navigation }) {
     Alert.alert("Not Found", "Walang Regular member na tugma sa QR code na ito.");
   };
 
-  const handleDelete = (id, isRegular) => {
+  const handleDelete = (id) => {
     if (!isManager) return;
     Alert.alert(
       "Delete Record",
@@ -822,7 +880,13 @@ export default function AttendanceScreen({ navigation }) {
   };
 
 
-  const saveLeadersToStorage = async () => { };
+  const saveLeadersToStorage = async (list) => {
+    try {
+      await AsyncStorage.setItem(LEADERS_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.log('Failed to save leader profiles', e);
+    }
+  };
 
   // Members ng leader = mga Regular na ang Cell Leader ay kapareho ng pangalan ng leader
   const getLeaderMembers = (leader) =>
@@ -879,7 +943,7 @@ export default function AttendanceScreen({ navigation }) {
     }
   };
 
-  const handleSaveLeader = () => {
+  const handleSaveLeader = async () => {
     if (!lName.trim()) {
       Alert.alert("Error", "Please enter the Leader's Full Name.");
       return;
@@ -901,29 +965,41 @@ export default function AttendanceScreen({ navigation }) {
       contact: lContact || 'N/A',
     };
 
-    let updatedLeaders;
-    if (editLeaderId) {
-      const old = leadersList.find(l => l.id === editLeaderId);
-      updatedLeaders = leadersList.map(l => (l.id === editLeaderId ? { ...l, ...data } : l));
-
-      // Kung pinalitan ang pangalan ng leader, i-update din ang Cell Leader ng mga members niya
-      if (old && normalizeName(old.name) !== normalizeName(data.name)) {
-        const updatedRegulars = regularList.map(r =>
-          normalizeName(r.cellLeader) === normalizeName(old.name) ? { ...r, cellLeader: data.name } : r
-        );
-        setRegularList(updatedRegulars);
-        saveDataToStorage(updatedRegulars, null, null, null);
+    try {
+      // If the leader was renamed, move their members to the new name on the server too.
+      if (editLeaderId) {
+        const old = leadersList.find(l => l.id === editLeaderId);
+        if (old && normalizeName(old.name) !== normalizeName(data.name)) {
+          const token = await getAuthToken();
+          if (!token) return;
+          for (const member of getLeaderMembers(old)) {
+            const response = await fetch(`${API_URL}/api/youth/${member.id}`, {
+              method: 'PUT',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ cellLeader: data.name }),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(result.message || `Could not update the Cell Leader for ${member.name}.`);
+            }
+          }
+        }
       }
-    } else {
-      updatedLeaders = [{ id: Date.now().toString(), ...data }, ...leadersList];
-    }
 
-    setLeadersList(updatedLeaders);
-    saveLeadersToStorage(updatedLeaders);
-    setLeaderFormVisible(false);
-    setLeaderDatePickerVisible(false);
-    setLeadersModalVisible(true);
-    Alert.alert("Success", editLeaderId ? "Successfully updated leader!" : "Successfully added leader!");
+      const others = leadersList.filter(l => l.id !== editLeaderId);
+      const updatedLeaders = [{ id: `leader-${normalizeName(data.name)}`, ...data }, ...others];
+      await saveLeadersToStorage(updatedLeaders);
+
+      setLeaderFormVisible(false);
+      setLeaderDatePickerVisible(false);
+      setLeadersModalVisible(true);
+      await loadYouthFromDatabase();
+      Alert.alert("Success", editLeaderId ? "Successfully updated leader!" : "Successfully added leader!");
+    } catch (error) {
+      console.error('Save leader error:', error);
+      await loadYouthFromDatabase();
+      Alert.alert('Save Failed', error.message || 'Could not save this leader. Please try again.');
+    }
   };
 
   const handleDeleteLeader = (leader) => {
@@ -965,6 +1041,7 @@ export default function AttendanceScreen({ navigation }) {
                 }
               }
 
+              await saveLeadersToStorage(leadersList.filter(l => normalizeName(l.name) !== normalizeName(leader.name)));
               await loadYouthFromDatabase();
               Alert.alert(
                 "Leader Removed",
@@ -1061,22 +1138,22 @@ export default function AttendanceScreen({ navigation }) {
           : members.map((m, i) => `
               <tr>
                 <td>${i + 1}</td>
-                <td><b>${m.name}</b></td>
-                <td>${m.sex} / ${getDisplayAge(m.age, m.birthday)}</td>
-                <td>${m.birthday}</td>
-                <td>${m.address}</td>
-                <td>${m.dateFilledOut || 'N/A'}</td>
+                <td><b>${escapeHtml(m.name)}</b></td>
+                <td>${escapeHtml(m.sex)} / ${getDisplayAge(m.age, m.birthday)}</td>
+                <td>${escapeHtml(m.birthday)}</td>
+                <td>${escapeHtml(m.address)}</td>
+                <td>${escapeHtml(m.dateFilledOut || 'N/A')}</td>
               </tr>
             `).join('');
 
         return `
           <div class="leader">
-            <h3>${li + 1}. ${leader.name} <span class="count">(${members.length} member${members.length === 1 ? '' : 's'})</span></h3>
+            <h3>${li + 1}. ${escapeHtml(leader.name)} <span class="count">(${members.length} member${members.length === 1 ? '' : 's'})</span></h3>
             <div class="info">
-              ${leader.sex} / ${getDisplayAge(leader.age, leader.birthday) || 'N/A'}
-              &nbsp;|&nbsp; B-Day: ${leader.birthday}
-              &nbsp;|&nbsp; Address: ${leader.address}
-              &nbsp;|&nbsp; Contact: ${leader.contact}
+              ${escapeHtml(leader.sex)} / ${getDisplayAge(leader.age, leader.birthday) || 'N/A'}
+              &nbsp;|&nbsp; B-Day: ${escapeHtml(leader.birthday)}
+              &nbsp;|&nbsp; Address: ${escapeHtml(leader.address)}
+              &nbsp;|&nbsp; Contact: ${escapeHtml(leader.contact)}
             </div>
             <table>
               <thead>
@@ -1113,7 +1190,7 @@ export default function AttendanceScreen({ navigation }) {
             </style>
           </head>
           <body>
-            <h2>IKONEK - ${title}</h2>
+            <h2>IKONEK - ${escapeHtml(title)}</h2>
             <div class="summary">Total Leaders: ${sortedLeaders.length} | Total Members: ${totalMembers}</div>
             ${sections}
           </body>
@@ -1135,6 +1212,11 @@ export default function AttendanceScreen({ navigation }) {
       Alert.alert("Error", "Please enter the Full Name.");
       return;
     }
+    const ageNumber = age.trim() ? Number(age) : null;
+    if (ageNumber !== null && (!Number.isFinite(ageNumber) || ageNumber < 0 || ageNumber > 120)) {
+      Alert.alert("Error", "Please enter a valid age.");
+      return;
+    }
 
     const token = await getAuthToken();
     if (!token) return;
@@ -1143,12 +1225,13 @@ export default function AttendanceScreen({ navigation }) {
     const payload = {
       name: name.trim(),
       gender: sex.trim() || null,
-      age: age.trim() ? Number(age) : null,
+      age: ageNumber,
       birthday: birthday.trim() || null,
       address: address.trim() || null,
       cellLeader: isAddingRegular ? (cellLeader.trim() || 'N/A') : 'N/A',
       category: isAddingRegular ? 'Regular' : 'Newbie',
       image: photo || null,
+      ...(SERVER_SUPPORTS_INVITED_BY && !isAddingRegular ? { invitedBy: invitedBy.trim() || null } : {}),
     };
 
     try {
@@ -1210,13 +1293,13 @@ export default function AttendanceScreen({ navigation }) {
                 ${combined.map((item, index) => `
                   <tr style="${item.isPresent ? 'background-color:#D1FAE5;' : ''}">
                     <td>${index + 1}</td>
-                    <td><b>${item.name}</b></td>
-                    <td>${item.status}</td>
-                    <td>${item.sex} / ${getDisplayAge(item.age, item.birthday)}</td>
-                    <td>${item.birthday}</td>
-                    <td>${item.address}</td>
-                    <td>${item.status === 'Regular' ? item.cellLeader : item.invitedBy}</td>
-                    <td>${item.dateFilledOut}</td>
+                    <td><b>${escapeHtml(item.name)}</b></td>
+                    <td>${escapeHtml(item.status)}</td>
+                    <td>${escapeHtml(item.sex)} / ${getDisplayAge(item.age, item.birthday)}</td>
+                    <td>${escapeHtml(item.birthday)}</td>
+                    <td>${escapeHtml(item.address)}</td>
+                    <td>${escapeHtml(item.status === 'Regular' ? item.cellLeader : item.invitedBy)}</td>
+                    <td>${escapeHtml(item.dateFilledOut)}</td>
                     <td style="text-align:center;">${item.isPresent ? '<b style="color:#047857;">&#10004; Present</b>' : '—'}</td>
                   </tr>
                 `).join('')}
@@ -1237,7 +1320,7 @@ export default function AttendanceScreen({ navigation }) {
   const filteredHistory = attendanceHistory.filter(log => {
     const q = historySearch.trim().toLowerCase();
     if (!q) return true;
-    return (log.date || '').toLowerCase().includes(q) || (log.name || '').toLowerCase().includes(q);
+    return (log.date || '').toLowerCase().includes(q) || (log.dateKey || '').includes(q) || (log.name || '').toLowerCase().includes(q);
   });
 
   // I-print ang History (kung ano ang naka-filter sa search bar)
@@ -1264,7 +1347,7 @@ export default function AttendanceScreen({ navigation }) {
             </style>
           </head>
           <body>
-            <h2>IKONEK - ${title}</h2>
+            <h2>IKONEK - ${escapeHtml(title)}</h2>
             <div class="summary">Total Records: ${filteredHistory.length}</div>
             <table>
               <thead>
@@ -1284,14 +1367,14 @@ export default function AttendanceScreen({ navigation }) {
                 ${filteredHistory.map((log, index) => `
                   <tr>
                     <td>${index + 1}</td>
-                    <td><b>${log.name}</b></td>
-                    <td>${log.status}</td>
-                    <td>${log.sex} / ${log.age}</td>
-                    <td>${log.birthday}</td>
-                    <td>${log.address}</td>
-                    <td>${log.leaderOrInvited}</td>
-                    <td>${log.date}</td>
-                    <td>${log.time}</td>
+                    <td><b>${escapeHtml(log.name)}</b></td>
+                    <td>${escapeHtml(log.status)}</td>
+                    <td>${escapeHtml(log.sex)} / ${escapeHtml(log.age)}</td>
+                    <td>${escapeHtml(log.birthday)}</td>
+                    <td>${escapeHtml(log.address)}</td>
+                    <td>${escapeHtml(log.leaderOrInvited)}</td>
+                    <td>${escapeHtml(log.date)}</td>
+                    <td>${escapeHtml(log.time)}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -1309,7 +1392,7 @@ export default function AttendanceScreen({ navigation }) {
   if (activeTab === 'All') {
     combinedData = [...regularList, ...newbieList];
   } else if (activeTab === 'Regular') {
-    combinedData = regularList;
+    combinedData = [...regularList];
   } else if (activeTab === 'First Timer') {
     combinedData = newbieList.filter(item => item.presentCountNumber <= 1);
   } else if (activeTab === 'Second Timer') {
@@ -1687,7 +1770,7 @@ export default function AttendanceScreen({ navigation }) {
                     <>
                       <TouchableOpacity
                         style={styles.deleteBtn}
-                        onPress={() => handleDelete(item.id, isRegular)}
+                        onPress={() => handleDelete(item.id)}
                       >
                         <Text style={styles.btnText}>🗑 Delete</Text>
                       </TouchableOpacity>
@@ -1702,7 +1785,7 @@ export default function AttendanceScreen({ navigation }) {
                   )}
 
                   {/* BACK / UNDO: admin-only */}
-                  {isManager && !isRegular && item.isPresent && (
+                  {isAdmin && !isRegular && item.isPresent && (
                     <TouchableOpacity
                       style={styles.undoBtn}
                       onPress={() => handleUndoNewbiePresent(item)}
@@ -1903,8 +1986,7 @@ export default function AttendanceScreen({ navigation }) {
                       value={selectedDateObj}
                       mode="date"
                       display="default"
-                      onValueChange={handleDateChange}
-                      onDismiss={() => setDatePickerVisible(false)}
+                      onChange={handleDateChange}
                     />
                   )}
 
@@ -2288,7 +2370,7 @@ export default function AttendanceScreen({ navigation }) {
                                   </TouchableOpacity>
                                   <TouchableOpacity
                                     style={[styles.smallBtn, { backgroundColor: '#7F1D1D' }]}
-                                    onPress={() => handleDelete(m.id, true)}
+                                    onPress={() => handleDelete(m.id)}
                                   >
                                     <Text style={styles.btnText}>🗑</Text>
                                   </TouchableOpacity>
@@ -2388,8 +2470,7 @@ export default function AttendanceScreen({ navigation }) {
                     value={lSelectedDate}
                     mode="date"
                     display="default"
-                    onValueChange={handleLeaderDateChange}
-                    onDismiss={() => setLeaderDatePickerVisible(false)}
+                    onChange={handleLeaderDateChange}
                   />
                 )}
 
@@ -2530,12 +2611,6 @@ const styles = StyleSheet.create({
   },
   headerRightSpacer: {
     width: 40,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
   },
   headerTitle: {
     fontSize: 22,
@@ -2924,14 +2999,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 6,
-  },
-  historyItemCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 8,
-    alignItems: 'center',
   },
 })

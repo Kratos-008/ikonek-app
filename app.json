@@ -15,6 +15,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.ikonek.app",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.CAMERA"
       ]

@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { sendPushToUsers } = require("../lib/push");
 
 const toDateKey = (value) => {
   if (!value) {
@@ -123,6 +124,12 @@ const checkIn = async (req, res) => {
             message: `Your attendance for ${event.title} was marked ${normalizedStatus.toLowerCase()}.`,
             relatedId: event.id,
           }
+        });
+        await sendPushToUsers([youth.userId], {
+          type: "ATTENDANCE_UPDATED",
+          title: "Attendance updated",
+          message: `Your attendance for ${event.title} was marked ${normalizedStatus.toLowerCase()}.`,
+          relatedId: event.id,
         });
       } catch (notificationError) { console.error("Attendance notification error:", notificationError.message); }
     }

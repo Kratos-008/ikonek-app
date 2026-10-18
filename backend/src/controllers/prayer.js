@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { sendPushToUsers } = require("../lib/push");
 const fs = require("fs");
 const path = require("path");
 
@@ -193,6 +194,12 @@ const updatePrayerRequest = async (req, res) => {
           message: data.status === "ANSWERED" ? "You marked your prayer request as answered. May this testimony encourage the church!" : "Your prayer request status has changed.",
           relatedId: existingRequest.id,
         } });
+        await sendPushToUsers([existingRequest.userId], {
+          type: "PRAYER_STATUS",
+          title: data.status === "ANSWERED" ? "Answered prayer marked" : "Prayer request updated",
+          message: data.status === "ANSWERED" ? "You marked your prayer request as answered. May this testimony encourage the church!" : "Your prayer request status has changed.",
+          relatedId: existingRequest.id,
+        });
       } catch (notificationError) { console.error("Prayer notification error:", notificationError.message); }
     }
     if (newImageUrl !== existingRequest.imageUrl && existingRequest.imageUrl) deleteImageFile(existingRequest.imageUrl);
@@ -245,7 +252,9 @@ const setPrayerReaction = async (req, res) => {
       update: { reaction },
     });
     if (post.userId && post.userId !== req.user.userId) {
-      await prisma.notification.create({ data: { userId: post.userId, type: "PRAYER_REACTION", title: "New reaction", message: "Someone reacted to your journal post.", relatedId: id } }).catch(e => console.error("Reaction notification error:", e.message));
+      const message = "Someone reacted to your journal post.";
+      await prisma.notification.create({ data: { userId: post.userId, type: "PRAYER_REACTION", title: "New reaction", message, relatedId: id } }).catch(e => console.error("Reaction notification error:", e.message));
+      await sendPushToUsers([post.userId], { type: "PRAYER_REACTION", title: "New reaction", message, relatedId: id });
     }
     return res.json({ success: true, reaction });
   } catch (error) {
@@ -264,7 +273,9 @@ const createPrayerComment = async (req, res) => {
     if (!post) return res.status(404).json({ success: false, message: "Post not found" });
     const comment = await prisma.prayerComment.create({ data: { postId: id, userId: req.user.userId, content }, include: { user: { select: { id: true, name: true } } } });
     if (post.userId && post.userId !== req.user.userId) {
-      await prisma.notification.create({ data: { userId: post.userId, type: "PRAYER_COMMENT", title: "New comment", message: `${comment.user?.name || "Someone"} commented on your journal post.`, relatedId: id } }).catch(e => console.error("Comment notification error:", e.message));
+      const message = `${comment.user?.name || "Someone"} commented on your journal post.`;
+      await prisma.notification.create({ data: { userId: post.userId, type: "PRAYER_COMMENT", title: "New comment", message, relatedId: id } }).catch(e => console.error("Comment notification error:", e.message));
+      await sendPushToUsers([post.userId], { type: "PRAYER_COMMENT", title: "New comment", message, relatedId: id });
     }
     return res.status(201).json({ success: true, comment });
   } catch (error) {

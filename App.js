@@ -26,6 +26,7 @@ import NotificationsScreen from './src/screens/NotificationsScreen';
 import PrayerJournalScreen from './src/screens/PrayerJournalScreen';
 import AttendanceScreen from './src/screens/AttendanceScreen';
 import { AdminDashboard } from './src/screens/AdminDashboard';
+import { registerForPushNotifications, unregisterPushNotifications } from './src/services/pushNotifications';
 
 // ======================================================
 // INTRO VIDEO SCREEN
@@ -123,7 +124,10 @@ function AppContent() {
         {
           text: 'Log Out',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
+            unregisterPushNotifications().catch((error) => {
+              console.warn('Push notification cleanup failed:', error.message);
+            });
             setCurrentUser(null);
             setCurrentScreen('SignIn');
             closeDrawer();
@@ -158,6 +162,11 @@ function AppContent() {
     });
 
     setCurrentUser(user);
+
+    registerForPushNotifications().catch((error) => {
+      // Push registration is optional; a network or permission issue must not block sign-in.
+      console.warn('Push notification registration failed:', error.message);
+    });
 
     const role = String(user?.role || '').trim().toLowerCase();
 
