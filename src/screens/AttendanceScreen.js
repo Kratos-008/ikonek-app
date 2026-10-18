@@ -51,8 +51,6 @@ export default function AttendanceScreen({ navigation }) {
 
   const [regularList, setRegularList] = useState([]);
   const [newbieList, setNewbieList] = useState([]);
-  // Timer levels are persisted by the backend; this map is only for legacy device overrides.
-  const [timerLevelOverrides, setTimerLevelOverrides] = useState({});
   const [eventsList, setEventsList] = useState([]);
   const [activeEvent, setActiveEvent] = useState(null);
   const [attendanceHistory, setAttendanceHistory] = useState([]);
@@ -215,13 +213,13 @@ export default function AttendanceScreen({ navigation }) {
   const getPresentRecordsForYouth = (records, youthId) =>
     records.filter(r => r.youthId === youthId && String(r.status).toUpperCase() === 'PRESENT');
 
-  const formatYouth = (item, records = [], currentEvent = null, levelOverrides = {}) => {
+  const formatYouth = (item, records = [], currentEvent = null) => {
     const category = item.category || 'Newbie';
     const youthRecords = getPresentRecordsForYouth(records, item.id);
     const recordedCount = youthRecords.length;
     const manualTimerLevels = { 'First Timer': 1, 'Second Timer': 2, 'Third Timer': 3 };
-    // Prefer the server value; use a local override only for legacy offline values.
-    const overrideLevel = item.timerLevel || levelOverrides[item.id];
+    // Timer level comes only from the server/database; never from device storage.
+    const overrideLevel = item.timerLevel;
     const isRegular = category === 'Regular' || overrideLevel === 'Regular';
     // Prefer the server's saved timer level; attendance history supplies the count when no level is saved.
     const count = overrideLevel && Object.prototype.hasOwnProperty.call(manualTimerLevels, overrideLevel)
@@ -327,16 +325,9 @@ export default function AttendanceScreen({ navigation }) {
       setAttendanceRecords(attendance);
       setAttendanceHistory(dedupeHistory(attendance.filter(r => String(r.status).toUpperCase() === 'PRESENT').map(formatHistoryRecord)));
 
-      let savedLevelOverrides = {};
-      try {
-        savedLevelOverrides = JSON.parse((await AsyncStorage.getItem('@ikonek_timer_level_overrides')) || '{}');
-      } catch (storageError) {
-        console.warn('Could not read saved timer-level overrides:', storageError);
-      }
-      setTimerLevelOverrides(savedLevelOverrides);
       const records = Array.isArray(youthData.youth)
         ? youthData.youth.map(item =>
-          formatYouth(item, attendance, attendanceDisplayEvent, savedLevelOverrides)
+          formatYouth(item, attendance, attendanceDisplayEvent)
         )
         : [];
       setRegularList(records.filter(x => x.status === 'Regular'));
@@ -515,11 +506,7 @@ export default function AttendanceScreen({ navigation }) {
         throw new Error('The server responded, but the saved timer level did not match. Please check the backend logs.');
       }
 
-      // The backend response confirms the database value. Clear any legacy device-only override.
-      const nextOverrides = { ...timerLevelOverrides };
-      delete nextOverrides[member.id];
-      await AsyncStorage.setItem('@ikonek_timer_level_overrides', JSON.stringify(nextOverrides));
-      setTimerLevelOverrides(nextOverrides);
+      // The backend response confirms the database value. Reload the canonical server state.
       await loadYouthFromDatabase();
       Alert.alert('Timer Level Updated', `${member.name} is now ${label}. The timer level was saved to the server.`);
     } catch (error) {
@@ -585,10 +572,7 @@ export default function AttendanceScreen({ navigation }) {
       const levelData = await levelResponse.json();
       if (!levelResponse.ok) throw new Error(levelData.message || 'Attendance was saved, but the timer level could not update.');
 
-      const nextOverrides = { ...timerLevelOverrides };
-      delete nextOverrides[id];
-      await AsyncStorage.setItem('@ikonek_timer_level_overrides', JSON.stringify(nextOverrides));
-      setTimerLevelOverrides(nextOverrides);
+      // Timer levels are read from the database; no device-only override is needed.
       await loadYouthFromDatabase();
       if (newCount >= 4) {
         Alert.alert('Congratulations! 🎉', `${member.name} has completed 4/4 attendance and is now a Regular Member.`);
