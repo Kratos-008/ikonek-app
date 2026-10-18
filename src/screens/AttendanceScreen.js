@@ -229,7 +229,12 @@ export default function AttendanceScreen({ navigation }) {
       : recordedCount;
     const todayKey = getTodayDateKey();
     const todayRecord = currentEvent
-      ? youthRecords.find(r => r.dateKey === todayKey && r.eventId === currentEvent.id)
+      ? records.find(
+        r =>
+          r.youthId === item.id &&
+          r.dateKey === todayKey &&
+          r.eventId === currentEvent.id
+      )
       : null;
 
     return {
@@ -245,7 +250,9 @@ export default function AttendanceScreen({ navigation }) {
       status: isRegular ? 'Regular' : (overrideLevel && manualTimerLevels[overrideLevel] ? overrideLevel : getNewbieStatusLabel(Math.min(4, count))),
       presentCountNumber: Math.min(4, count),
       presentCount: `${Math.min(4, count)} / 4`,
-      isPresent: !!todayRecord,
+      isPresent: String(todayRecord?.status || '').toUpperCase() === 'PRESENT',
+      attendanceStatus: String(todayRecord?.status || '').toUpperCase(),
+      attendanceFinalized: !!currentEvent?.attendanceFinalized,
       attendanceRecordId: todayRecord?.id || null,
       photo: item.image || null,
     };
@@ -308,6 +315,13 @@ export default function AttendanceScreen({ navigation }) {
       const events = Array.isArray(eventsData.events) ? eventsData.events : [];
       const currentEvent = getActiveEventFromList(events);
 
+      // Used to display today's attendance even after finalization.
+      // Keep this separate from currentEvent so finalized attendance
+      // remains closed for editing.
+      const attendanceDisplayEvent = [...events]
+        .filter(event => getEventDateKey(event.date) === getTodayDateKey())
+        .sort((a, b) => new Date(b.date) - new Date(a.date))[0] || null;
+
       setEventsList(events);
       setActiveEvent(currentEvent);
       setAttendanceRecords(attendance);
@@ -321,7 +335,9 @@ export default function AttendanceScreen({ navigation }) {
       }
       setTimerLevelOverrides(savedLevelOverrides);
       const records = Array.isArray(youthData.youth)
-        ? youthData.youth.map(item => formatYouth(item, attendance, currentEvent, savedLevelOverrides))
+        ? youthData.youth.map(item =>
+          formatYouth(item, attendance, attendanceDisplayEvent, savedLevelOverrides)
+        )
         : [];
       setRegularList(records.filter(x => x.status === 'Regular'));
       setNewbieList(records.filter(x => x.status !== 'Regular'));
@@ -1572,11 +1588,34 @@ export default function AttendanceScreen({ navigation }) {
 
                   <TouchableOpacity
                     style={{ flex: 0.9, justifyContent: 'center', alignSelf: 'stretch' }}
-                    disabled={!presentNow}
-                    onPress={() => handleUncheckPresent(item)}
+                    disabled={!presentNow || item.attendanceFinalized}
+                    onPress={() => {
+                      if (!item.attendanceFinalized) {
+                        handleUncheckPresent(item);
+                      }
+                    }}
                   >
-                    <Text style={{ fontSize: 10, fontWeight: 'bold', color: presentNow ? '#34D399' : theme.textSub }}>
-                      {presentNow ? '✅ Present' : '—'}
+                    <Text
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 'bold',
+                        color:
+                          item.attendanceFinalized && item.attendanceStatus === 'ABSENT'
+                            ? '#EF4444'
+                            : presentNow
+                              ? '#34D399'
+                              : theme.textSub,
+                      }}
+                    >
+                      {item.attendanceFinalized
+                        ? item.attendanceStatus === 'PRESENT'
+                          ? '✅ Present'
+                          : item.attendanceStatus === 'ABSENT'
+                            ? '❌ Absent'
+                            : '—'
+                        : presentNow
+                          ? '✅ Present'
+                          : '—'}
                     </Text>
                   </TouchableOpacity>
                 </View>
