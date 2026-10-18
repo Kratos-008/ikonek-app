@@ -51,7 +51,7 @@ export default function AttendanceScreen({ navigation }) {
 
   const [regularList, setRegularList] = useState([]);
   const [newbieList, setNewbieList] = useState([]);
-  // Manual timer-level overrides are device-local until backend/schema support is added.
+  // Timer levels are persisted by the backend; this map is only for legacy device overrides.
   const [timerLevelOverrides, setTimerLevelOverrides] = useState({});
   const [eventsList, setEventsList] = useState([]);
   const [activeEvent, setActiveEvent] = useState(null);
@@ -223,7 +223,7 @@ export default function AttendanceScreen({ navigation }) {
     // Prefer the server value; use a local override only for legacy offline values.
     const overrideLevel = item.timerLevel || levelOverrides[item.id];
     const isRegular = category === 'Regular' || overrideLevel === 'Regular';
-    // Manual timer levels are stored locally on this device; otherwise use server attendance history.
+    // Prefer the server's saved timer level; attendance history supplies the count when no level is saved.
     const count = overrideLevel && Object.prototype.hasOwnProperty.call(manualTimerLevels, overrideLevel)
       ? manualTimerLevels[overrideLevel]
       : recordedCount;
@@ -511,8 +511,11 @@ export default function AttendanceScreen({ navigation }) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'The server could not save the timer level.');
+      if (data.youth && data.youth.timerLevel !== timerLevel) {
+        throw new Error('The server responded, but the saved timer level did not match. Please check the backend logs.');
+      }
 
-      // Clear any old device-only override so the server value takes precedence.
+      // The backend response confirms the database value. Clear any legacy device-only override.
       const nextOverrides = { ...timerLevelOverrides };
       delete nextOverrides[member.id];
       await AsyncStorage.setItem('@ikonek_timer_level_overrides', JSON.stringify(nextOverrides));
@@ -574,6 +577,8 @@ export default function AttendanceScreen({ navigation }) {
           address: member.address === 'N/A' ? null : member.address,
           cellLeader: member.cellLeader || 'N/A',
           category: newCount >= 4 ? 'Regular' : 'Newbie',
+          // Keep the timer level in Neon in sync with attendance progression.
+          timerLevel: newCount >= 4 ? 'Regular' : nextCategory,
           image: member.photo || null,
         }),
       });
