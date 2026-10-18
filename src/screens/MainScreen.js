@@ -69,7 +69,7 @@ const getDailyVerse = () => {
 
   return DAILY_VERSES[
     ((dayNumber % DAILY_VERSES.length) + DAILY_VERSES.length) %
-      DAILY_VERSES.length
+    DAILY_VERSES.length
   ];
 };
 
@@ -136,75 +136,75 @@ export default function MainScreen({
     () =>
       isDarkMode
         ? {
-            background: '#07152E',
-            surface: '#101F39',
-            surfaceBorder: '#1E3A61',
+          background: '#07152E',
+          surface: '#101F39',
+          surfaceBorder: '#1E3A61',
 
-            primaryText: '#F7F9FF',
-            secondaryText: '#91A8CA',
-            mutedText: '#526A8D',
+          primaryText: '#F7F9FF',
+          secondaryText: '#91A8CA',
+          mutedText: '#526A8D',
 
-            menuIcon: '#F7F9FF',
-            notificationIcon: '#F7F9FF',
+          menuIcon: '#F7F9FF',
+          notificationIcon: '#F7F9FF',
 
-            primary: '#2875F5',
-            accent: '#55A1FF',
+          primary: '#2875F5',
+          accent: '#55A1FF',
 
-            verseOverlay: 'rgba(3,17,39,0.64)',
-            verseText: '#FFFFFF',
-            verseReference: '#D8E5FF',
+          verseOverlay: 'rgba(3,17,39,0.64)',
+          verseText: '#FFFFFF',
+          verseReference: '#D8E5FF',
 
-            verseBadge: '#F5B82E',
-            verseBadgeText: '#07152E',
+          verseBadge: '#F5B82E',
+          verseBadgeText: '#07152E',
 
-            readButton: '#F7F9FF',
-            readButtonText: '#07152E',
+          readButton: '#F7F9FF',
+          readButtonText: '#07152E',
 
-            present: '#16C9A6',
-            absent: '#FF6575',
+          present: '#16C9A6',
+          absent: '#FF6575',
 
-            quickBible: '#2875F5',
-            quickEvents: '#8B42F5',
-            quickJournal: '#16C9A6',
-            quickAttendance: '#F5B82E',
+          quickBible: '#2875F5',
+          quickEvents: '#8B42F5',
+          quickJournal: '#16C9A6',
+          quickAttendance: '#F5B82E',
 
-            refresh: '#55A1FF',
-          }
+          refresh: '#55A1FF',
+        }
         : {
-            background: '#F8FAFC',
-            surface: '#FFFFFF',
-            surfaceBorder: '#E2E8F0',
+          background: '#F8FAFC',
+          surface: '#FFFFFF',
+          surfaceBorder: '#E2E8F0',
 
-            primaryText: '#0F172A',
-            secondaryText: '#64748B',
-            mutedText: '#94A3B8',
+          primaryText: '#0F172A',
+          secondaryText: '#64748B',
+          mutedText: '#94A3B8',
 
-            menuIcon: '#0F172A',
-            notificationIcon: '#0F172A',
+          menuIcon: '#0F172A',
+          notificationIcon: '#0F172A',
 
-            primary: '#2875F5',
-            accent: '#2563EB',
+          primary: '#2875F5',
+          accent: '#2563EB',
 
-            verseOverlay: 'rgba(15,23,42,0.42)',
-            verseText: '#FFFFFF',
-            verseReference: '#E2E8F0',
+          verseOverlay: 'rgba(15,23,42,0.42)',
+          verseText: '#FFFFFF',
+          verseReference: '#E2E8F0',
 
-            verseBadge: '#F5B82E',
-            verseBadgeText: '#0F172A',
+          verseBadge: '#F5B82E',
+          verseBadgeText: '#0F172A',
 
-            readButton: '#FFFFFF',
-            readButtonText: '#0F172A',
+          readButton: '#FFFFFF',
+          readButtonText: '#0F172A',
 
-            present: '#0E9F83',
-            absent: '#E11D48',
+          present: '#0E9F83',
+          absent: '#E11D48',
 
-            quickBible: '#2875F5',
-            quickEvents: '#8B42F5',
-            quickJournal: '#16A085',
-            quickAttendance: '#D99E00',
+          quickBible: '#2875F5',
+          quickEvents: '#8B42F5',
+          quickJournal: '#16A085',
+          quickAttendance: '#D99E00',
 
-            refresh: '#2563EB',
-          },
+          refresh: '#2563EB',
+        },
     [isDarkMode]
   );
 
@@ -316,10 +316,10 @@ export default function MainScreen({
 
   const eventAttendanceRecords = upcomingEvent
     ? attendanceRecords.filter((item) =>
-        item.eventId
-          ? item.eventId === upcomingEvent.id
-          : item.dateKey === selectedEventDateKey
-      )
+      item.eventId
+        ? item.eventId === upcomingEvent.id
+        : item.dateKey === selectedEventDateKey
+    )
     : [];
 
   const present = eventAttendanceRecords.filter(
@@ -335,27 +335,24 @@ export default function MainScreen({
   const registeredAttendeeCount = Array.isArray(upcomingEvent?.attendees)
     ? upcomingEvent.attendees.length
     : 0;
-  const finalizedAbsent = upcomingEvent?.attendanceFinalized
-    ? Math.max(recordedAbsent, registeredAttendeeCount - present, 0)
-    : recordedAbsent;
-  const absent = finalizedAbsent;
-  const markedTotal = upcomingEvent?.attendanceFinalized
-    ? Math.max(registeredAttendeeCount, present + absent)
-    : present + absent;
+  const absent = recordedAbsent;
+
+  const markedTotal = present + absent;
+
   const attendancePercentage = markedTotal
     ? Math.round((present / markedTotal) * 100)
     : 0;
 
   const eventDate = upcomingEvent?.date
     ? new Date(
-        upcomingEvent.date
-      ).toLocaleString('en-US', {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      })
+      upcomingEvent.date
+    ).toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
     : 'No upcoming event';
 
   const displayName = user?.name || 'Youth';

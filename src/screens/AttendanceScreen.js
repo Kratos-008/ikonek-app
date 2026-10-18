@@ -1709,148 +1709,258 @@ export default function AttendanceScreen({ navigation }) {
         )}
 
         {/* ADD/EDIT MODAL */}
+
         <Modal
           visible={modalVisible}
           animationType="slide"
           transparent={true}
           onRequestClose={closeMemberModal}
         >
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, { backgroundColor: theme.cardBg }]}>
-              <Text style={[styles.modalTitle, { color: theme.textMain }]}>
-                {isEditing ? 'Edit Record' : `Add New ${isRegularForm ? 'Regular' : 'Timer'} Member`}
-              </Text>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
+          >
+            <View style={styles.modalOverlay}>
+              <View
+                style={[
+                  styles.modalContent,
+                  {
+                    backgroundColor: theme.cardBg,
+                    maxHeight: '90%',
+                  },
+                ]}
+              >
+                <Text style={[styles.modalTitle, { color: theme.textMain }]}>
+                  {isEditing
+                    ? 'Edit Record'
+                    : `Add New ${isRegularForm ? 'Regular' : 'Timer'} Member`}
+                </Text>
 
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={styles.modalPhotoContainer}>
-                  {photo ? (
-                    <Image source={{ uri: photo }} style={styles.modalAvatarImage} />
-                  ) : (
-                    <View style={[styles.modalAvatarPlaceholder, { backgroundColor: theme.inputBg, borderColor: theme.border }]}>
-                      <Text style={{ fontSize: 24 }}>📷</Text>
+                <ScrollView
+                  style={{ flexShrink: 1 }}
+                  contentContainerStyle={{ paddingBottom: 20 }}
+                  showsVerticalScrollIndicator={true}
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="on-drag"
+                >
+                  <View style={styles.modalPhotoContainer}>
+                    {photo ? (
+                      <Image
+                        source={{ uri: photo }}
+                        style={styles.modalAvatarImage}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.modalAvatarPlaceholder,
+                          {
+                            backgroundColor: theme.inputBg,
+                            borderColor: theme.border,
+                          },
+                        ]}
+                      >
+                        <Text style={{ fontSize: 24 }}>📷</Text>
+                      </View>
+                    )}
+
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                      <TouchableOpacity
+                        style={styles.photoActionBtn}
+                        onPress={handleTakePhoto}
+                      >
+                        <Text style={styles.photoActionText}>Take Photo</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.photoActionBtn}
+                        onPress={handlePickFromGallery}
+                      >
+                        <Text style={styles.photoActionText}>Gallery</Text>
+                      </TouchableOpacity>
                     </View>
+                  </View>
+
+                  <Text style={[styles.inputLabel, { color: theme.textSub }]}>
+                    Full Name *
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.inputField,
+                      {
+                        backgroundColor: theme.inputBg,
+                        borderColor: theme.border,
+                        color: theme.textMain,
+                      },
+                    ]}
+                    placeholder="e.g. Juan Dela Cruz"
+                    placeholderTextColor={theme.textSub}
+                    value={name}
+                    onChangeText={setName}
+                  />
+
+                  <Text style={[styles.inputLabel, { color: theme.textSub }]}>
+                    Gender
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                    {['Male', 'Female'].map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={{
+                          flex: 1,
+                          minHeight: 46,
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          borderColor: sex === option ? '#3B82F6' : theme.border,
+                          backgroundColor: sex === option ? '#3B82F6' : theme.inputBg,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                        onPress={() => setSex(option)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: sex === option }}
+                      >
+                        <Text
+                          style={{
+                            color: sex === option ? '#FFFFFF' : theme.textMain,
+                            fontWeight: '600',
+                          }}
+                        >
+                          {option}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={[styles.inputLabel, { color: theme.textSub }]}>
+                    Age
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.inputField,
+                      {
+                        backgroundColor: theme.inputBg,
+                        borderColor: theme.border,
+                        color: theme.textMain,
+                      },
+                    ]}
+                    placeholder="e.g. 21"
+                    placeholderTextColor={theme.textSub}
+                    keyboardType="numeric"
+                    value={age}
+                    onChangeText={setAge}
+                  />
+
+                  <Text style={[styles.inputLabel, { color: theme.textSub }]}>
+                    Birthday
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.inputField,
+                      {
+                        backgroundColor: theme.inputBg,
+                        borderColor: theme.border,
+                        justifyContent: 'center',
+                      },
+                    ]}
+                    onPress={() => setDatePickerVisible(true)}
+                  >
+                    <Text style={{ color: birthday ? theme.textMain : theme.textSub }}>
+                      {birthday || 'Select Birthday (Tap here)'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {datePickerVisible && (
+                    <DateTimePicker
+                      value={selectedDateObj}
+                      mode="date"
+                      display="default"
+                      onValueChange={handleDateChange}
+                      onDismiss={() => setDatePickerVisible(false)}
+                    />
                   )}
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <TouchableOpacity style={styles.photoActionBtn} onPress={handleTakePhoto}>
-                      <Text style={styles.photoActionText}>Take Photo</Text>
+
+                  <Text style={[styles.inputLabel, { color: theme.textSub }]}>
+                    Address
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.inputField,
+                      {
+                        backgroundColor: theme.inputBg,
+                        borderColor: theme.border,
+                        color: theme.textMain,
+                      },
+                    ]}
+                    placeholder="e.g. Masbate City"
+                    placeholderTextColor={theme.textSub}
+                    value={address}
+                    onChangeText={setAddress}
+                  />
+
+                  {isRegularForm ? (
+                    <>
+                      <Text style={[styles.inputLabel, { color: theme.textSub }]}>
+                        Cell Leader
+                      </Text>
+                      <TextInput
+                        style={[
+                          styles.inputField,
+                          {
+                            backgroundColor: theme.inputBg,
+                            borderColor: theme.border,
+                            color: theme.textMain,
+                          },
+                        ]}
+                        placeholder="e.g. Pastor John"
+                        placeholderTextColor={theme.textSub}
+                        value={cellLeader}
+                        onChangeText={setCellLeader}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <Text style={[styles.inputLabel, { color: theme.textSub }]}>
+                        Invited By
+                      </Text>
+                      <TextInput
+                        style={[
+                          styles.inputField,
+                          {
+                            backgroundColor: theme.inputBg,
+                            borderColor: theme.border,
+                            color: theme.textMain,
+                          },
+                        ]}
+                        placeholder="e.g. Mary Doe"
+                        placeholderTextColor={theme.textSub}
+                        value={invitedBy}
+                        onChangeText={setInvitedBy}
+                      />
+                    </>
+                  )}
+
+                  <View style={styles.modalBtnRow}>
+                    <TouchableOpacity
+                      style={[styles.modalCancelBtn, { backgroundColor: '#EF4444' }]}
+                      onPress={closeMemberModal}
+                    >
+                      <Text style={[styles.modalCancelText, { color: '#FFFFFF' }]}>
+                        Cancel
+                      </Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.photoActionBtn} onPress={handlePickFromGallery}>
-                      <Text style={styles.photoActionText}>Gallery</Text>
+
+                    <TouchableOpacity
+                      style={styles.modalSaveBtn}
+                      onPress={handleSave}
+                    >
+                      <Text style={styles.modalSaveText}>Save Record</Text>
                     </TouchableOpacity>
                   </View>
-                </View>
-
-                <Text style={[styles.inputLabel, { color: theme.textSub }]}>Full Name *</Text>
-                <TextInput
-                  style={[styles.inputField, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.textMain }]}
-                  placeholder="e.g. Juan Dela Cruz"
-                  placeholderTextColor={theme.textSub}
-                  value={name}
-                  onChangeText={setName}
-                />
-
-                <Text style={[styles.inputLabel, { color: theme.textSub }]}>Gender</Text>
-                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-                  {['Male', 'Female'].map((option) => (
-                    <TouchableOpacity
-                      key={option}
-                      style={{
-                        flex: 1,
-                        minHeight: 46,
-                        borderRadius: 10,
-                        borderWidth: 1,
-                        borderColor: sex === option ? '#3B82F6' : theme.border,
-                        backgroundColor: sex === option ? '#3B82F6' : theme.inputBg,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                      onPress={() => setSex(option)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: sex === option }}
-                    >
-                      <Text style={{ color: sex === option ? '#FFFFFF' : theme.textMain, fontWeight: '600' }}>{option}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={[styles.inputLabel, { color: theme.textSub }]}>Age</Text>
-                <TextInput
-                  style={[styles.inputField, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.textMain }]}
-                  placeholder="e.g. 21"
-                  placeholderTextColor={theme.textSub}
-                  keyboardType="numeric"
-                  value={age}
-                  onChangeText={setAge}
-                />
-
-                <Text style={[styles.inputLabel, { color: theme.textSub }]}>Birthday</Text>
-                <TouchableOpacity
-                  style={[styles.inputField, { backgroundColor: theme.inputBg, borderColor: theme.border, justifyContent: 'center' }]}
-                  onPress={() => setDatePickerVisible(true)}
-                >
-                  <Text style={{ color: birthday ? theme.textMain : theme.textSub }}>
-                    {birthday || 'Select Birthday (Tap here)'}
-                  </Text>
-                </TouchableOpacity>
-
-                {datePickerVisible && (
-                  <DateTimePicker
-                    value={selectedDateObj}
-                    mode="date"
-                    display="default"
-                    onValueChange={handleDateChange}
-                    onDismiss={() => setDatePickerVisible(false)}
-                  />
-                )}
-
-                <Text style={[styles.inputLabel, { color: theme.textSub }]}>Address</Text>
-                <TextInput
-                  style={[styles.inputField, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.textMain }]}
-                  placeholder="e.g. Masbate City"
-                  placeholderTextColor={theme.textSub}
-                  value={address}
-                  onChangeText={setAddress}
-                />
-
-                {isRegularForm ? (
-                  <>
-                    <Text style={[styles.inputLabel, { color: theme.textSub }]}>Cell Leader</Text>
-                    <TextInput
-                      style={[styles.inputField, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.textMain }]}
-                      placeholder="e.g. Pastor John"
-                      placeholderTextColor={theme.textSub}
-                      value={cellLeader}
-                      onChangeText={setCellLeader}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <Text style={[styles.inputLabel, { color: theme.textSub }]}>Invited By</Text>
-                    <TextInput
-                      style={[styles.inputField, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.textMain }]}
-                      placeholder="e.g. Mary Doe"
-                      placeholderTextColor={theme.textSub}
-                      value={invitedBy}
-                      onChangeText={setInvitedBy}
-                    />
-                  </>
-                )}
-
-                <View style={styles.modalBtnRow}>
-                  <TouchableOpacity
-                    style={[styles.modalCancelBtn, { backgroundColor: '#EF4444' }]}
-                    onPress={closeMemberModal}
-                  >
-                    <Text style={[styles.modalCancelText, { color: '#FFFFFF' }]}>Cancel</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSave}>
-                    <Text style={styles.modalSaveText}>Save Record</Text>
-                  </TouchableOpacity>
-                </View>
-              </ScrollView>
+                </ScrollView>
+              </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* QR CODE MODAL */}
@@ -2356,8 +2466,8 @@ export default function AttendanceScreen({ navigation }) {
           </View>
         </Modal>
 
-      </ScrollView>
-    </SafeAreaView>
+      </ScrollView >
+    </SafeAreaView >
   );
 }
 

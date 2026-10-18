@@ -115,13 +115,15 @@ const checkIn = async (req, res) => {
 
     if (youth.userId && (!previousAttendance || previousAttendance.status !== normalizedStatus)) {
       try {
-        await prisma.notification.create({ data: {
-          userId: youth.userId,
-          type: "ATTENDANCE_UPDATED",
-          title: "Attendance updated",
-          message: `Your attendance for ${event.title} was marked ${normalizedStatus.toLowerCase()}.`,
-          relatedId: event.id,
-        } });
+        await prisma.notification.create({
+          data: {
+            userId: youth.userId,
+            type: "ATTENDANCE_UPDATED",
+            title: "Attendance updated",
+            message: `Your attendance for ${event.title} was marked ${normalizedStatus.toLowerCase()}.`,
+            relatedId: event.id,
+          }
+        });
       } catch (notificationError) { console.error("Attendance notification error:", notificationError.message); }
     }
     res.status(201).json({
@@ -259,27 +261,23 @@ const finalizeAttendance = async (req, res) => {
       return res.status(403).json({ success: false, message: "Not authorized to finalize attendance" });
     }
 
-    // Only registered attendees should receive automatic ABSENT records.
-    // Event.attendees stores names, so match names case-insensitively against
-    // existing youth profiles. Keep the Leader assignment restriction.
-    const registeredNames = new Set(
-      (Array.isArray(event.attendees) ? event.attendees : [])
-        .map((name) => String(name || "").trim().toLowerCase())
-        .filter(Boolean)
-    );
-
+    // Finalize all youth members, regardless of event registration.
+    // Leaders remain limited to members assigned to them.
     const allYouthProfiles = await prisma.youthProfile.findMany({
       select: { id: true, name: true, cellLeader: true },
     });
-    const leaderName = String(req.user?.name || "").trim().toLowerCase();
+
+    const leaderName = String(req.user?.name || "")
+      .trim()
+      .toLowerCase();
+
     const youthProfiles = allYouthProfiles.filter((youth) => {
-      const isRegistered = registeredNames.has(
-        String(youth.name || "").trim().toLowerCase()
+      if (!isLeader) return true;
+
+      return (
+        String(youth.cellLeader || "").trim().toLowerCase() ===
+        leaderName
       );
-      const isAssignedToLeader =
-        !isLeader ||
-        String(youth.cellLeader || "").trim().toLowerCase() === leaderName;
-      return isRegistered && isAssignedToLeader;
     });
 
     // Registered attendees must end up with a definitive status. Preserve
@@ -320,13 +318,13 @@ const finalizeAttendance = async (req, res) => {
 
       const updated = existingUnmarkedIds.length
         ? await tx.attendance.updateMany({
-            where: { id: { in: existingUnmarkedIds } },
-            data: {
-              status: "ABSENT",
-              eventId: event.id,
-              attendanceDate: dateFromKey(eventDateKey),
-            },
-          })
+          where: { id: { in: existingUnmarkedIds } },
+          data: {
+            status: "ABSENT",
+            eventId: event.id,
+            attendanceDate: dateFromKey(eventDateKey),
+          },
+        })
         : { count: 0 };
 
       if (isAdmin) {
