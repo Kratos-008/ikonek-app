@@ -1,6 +1,11 @@
 const prisma = require("../lib/prisma");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+
+// How long a login token lasts. /api/auth/me hands out a fresh one every time the app
+// opens, so people who use the app regularly are never signed out by expiry.
+// Set JWT_EXPIRES_IN (for example "30d") on Render to change it without editing code.
+const SESSION_EXPIRY = process.env.JWT_EXPIRES_IN || "7d";
 const crypto = require("crypto");
 const { sendVerificationEmail, sendPasswordResetEmail } = require("../lib/email");
 
@@ -419,7 +424,7 @@ const linkExistingMember = async (req, res) => {
       await tx.user.update({ where: { id: userId }, data: { role: newRole } });
     });
 
-    const token = jwt.sign({ userId: user.id, role: newRole }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign({ userId: user.id, role: newRole }, process.env.JWT_SECRET, { expiresIn: SESSION_EXPIRY });
     return res.json({
       success: true,
       message: "Your account has been linked to your existing member profile.",
@@ -483,7 +488,7 @@ const login = async (req, res) => {
         role: user.role,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: SESSION_EXPIRY }
     );
 
     res.json({
@@ -630,6 +635,36 @@ const resetPassword = async (req, res) => {
   }
 };
 
+// Confirms the saved login is still valid and returns the current profile plus a
+// fresh token. Called by the app every time it opens.
+const getMe = async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, name: true, email: true, role: true, emailVerified: true },
+    });
+
+    if (!user || !user.emailVerified) {
+      return res.status(401).json({ success: false, message: "Account not found" });
+    }
+
+    const token = jwt.sign(
+      { userId: user.id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: SESSION_EXPIRY }
+    );
+
+    return res.json({
+      success: true,
+      token,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    });
+  } catch (error) {
+    console.error("Load current user failed:", error);
+    return res.status(500).json({ success: false, message: "Unable to load your account." });
+  }
+};
+
 module.exports = {
   requestPasswordReset,
   verifyPasswordReset,
@@ -638,5 +673,6 @@ module.exports = {
   verifyEmail,
   resendVerification,
   login,
+  getMe,
   linkExistingMember,
 };

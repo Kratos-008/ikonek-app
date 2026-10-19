@@ -124,34 +124,37 @@ router.post(
         });
       }
 
-      const names = Array.isArray(event.attendees)
-        ? event.attendees
-        : [];
+      const names = Array.isArray(event.attendees) ? event.attendees : [];
 
-      const profiles = names.length
+      // Attendees are stored by name, so match names the way the signup flow does:
+      // ignoring capitalization and extra spaces (the old exact match missed these).
+      const normalizeName = (value) =>
+        String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+      const attendeeKeys = new Set(names.map(normalizeName).filter(Boolean));
+
+      const linkedProfiles = attendeeKeys.size
         ? await prisma.youthProfile.findMany({
-            where: {
-              name: {
-                in: names,
-              },
-              userId: {
-                not: null,
-              },
-            },
-            select: {
-              userId: true,
-            },
+            where: { userId: { not: null } },
+            select: { name: true, userId: true },
           })
         : [];
 
-      // Avoid notifying the same account more than once.
-      const userIds = [
-        ...new Set(
-          profiles
-            .map((profile) => profile.userId)
-            .filter(Boolean)
-        ),
-      ];
+      const accountsByName = new Map();
+      for (const profile of linkedProfiles) {
+        const key = normalizeName(profile.name);
+        if (!attendeeKeys.has(key)) continue;
+        if (!accountsByName.has(key)) accountsByName.set(key, []);
+        accountsByName.get(key).push(profile);
+      }
+
+      // If two linked members share a name we cannot tell which one signed up,
+      // so skip them instead of reminding the wrong person.
+      const userIds = [];
+      const skippedNames = [];
+      for (const profiles of accountsByName.values()) {
+        if (profiles.length === 1) userIds.push(profiles[0].userId);
+        else skippedNames.push(String(profiles[0].name || "").trim());
+      }
 
       if (userIds.length > 0) {
         await prisma.notification.createMany({
@@ -171,10 +174,15 @@ router.post(
         });
       }
 
+      const skippedNote = skippedNames.length
+        ? ` Skipped ${skippedNames.length} name(s) shared by more than one member: ${skippedNames.join(", ")}.`
+        : "";
+
       return res.json({
         success: true,
-        message: `Reminder sent to ${userIds.length} linked attendee account(s).`,
+        message: `Reminder sent to ${userIds.length} linked attendee account(s).${skippedNote}`,
         recipientCount: userIds.length,
+        skippedNames,
       });
     } catch (error) {
       console.error("Send attendance reminder failed:", error);

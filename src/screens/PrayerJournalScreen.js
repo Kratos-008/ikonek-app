@@ -542,43 +542,6 @@ export default function PrayerJournalScreen({ navigation }) {
     );
   };
 
-  // Logout.
-  const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Logout',
-          style: 'destructive',
-
-          onPress: async () => {
-            try {
-              await AsyncStorage.removeItem(
-                '@ikonek_token'
-              );
-
-              await AsyncStorage.removeItem(
-                '@ikonek_user'
-              );
-
-              navigation?.goBack?.();
-            } catch (error) {
-              console.error(
-                'Logout error:',
-                error
-              );
-            }
-          },
-        },
-      ]
-    );
-  };
-
   // Format date.
   const formatDate = (dateString) => {
     if (!dateString) return '';

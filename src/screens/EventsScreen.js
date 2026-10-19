@@ -26,6 +26,7 @@ import { useTheme } from '../context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Notifications from 'expo-notifications';
+import { ensureNotificationChannel, NOTIFICATION_CHANNEL_ID } from '../services/pushNotifications';
 
 const API_URL = 'https://ikonek-app.onrender.com';
 const EVENT_REMINDER_STORAGE_KEY = '@ikonek_event_reminder_notifications';
@@ -47,14 +48,7 @@ const writeReminderMap = async (key, value) => {
   await AsyncStorage.setItem(key, JSON.stringify(value));
 };
 
-// Show notifications while the app is open as well as when it is in the background.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// The foreground notification handler is set once in src/services/pushNotifications.js.
 
 const getEventDateForReminder = (value) => {
   if (!value) return null;
@@ -477,6 +471,9 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
         return;
       }
 
+      // Android needs the channel to exist before a reminder is scheduled on it.
+      await ensureNotificationChannel();
+
       const notificationIds = [];
       for (const reminder of triggers) {
         const notificationId = await Notifications.scheduleNotificationAsync({
@@ -486,7 +483,11 @@ export default function EventsScreen({ navigation, onBack, onNavigateToMain }) {
             data: { eventId: String(event.id), eventTitle: event.title },
             sound: 'default',
           },
-          trigger: reminder.date,
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: reminder.date,
+            channelId: NOTIFICATION_CHANNEL_ID,
+          },
         });
         notificationIds.push(notificationId);
       }

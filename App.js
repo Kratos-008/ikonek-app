@@ -10,6 +10,7 @@ import {
   Animated,
   Dimensions,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -26,7 +27,15 @@ import NotificationsScreen from './src/screens/NotificationsScreen';
 import PrayerJournalScreen from './src/screens/PrayerJournalScreen';
 import AttendanceScreen from './src/screens/AttendanceScreen';
 import { AdminDashboard } from './src/screens/AdminDashboard';
-import { registerForPushNotifications, unregisterPushNotifications } from './src/services/pushNotifications';
+import { registerAfterSignIn, registerForPushNotifications } from './src/services/pushNotifications';
+import {
+  clearStoredSession,
+  isAdminUser,
+  loadStoredSession,
+  signOutCleanup,
+  verifySession,
+} from './src/services/session';
+import usePushLifecycle from './src/hooks/usePushLifecycle';
 
 // ======================================================
 // INTRO VIDEO SCREEN
@@ -85,6 +94,8 @@ function AppContent() {
   const [currentUser, setCurrentUser] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [adminYouthView, setAdminYouthView] = useState(false);
+  // True until the saved login (if any) has been read from the phone.
+  const [booting, setBooting] = useState(true);
 
   const drawerX = useRef(
     new Animated.Value(-Dimensions.get('window').width * 0.78)
@@ -108,6 +119,92 @@ function AppContent() {
   };
 
   // ==========================================
+  // SESSION: stay signed in until the user taps Log Out
+  // ==========================================
+  const performLogout = async ({ expired = false } = {}) => {
+    try {
+      // Removes this phone's push token from the server, cancels local
+      // reminders and wipes the saved login (in that order).
+      await signOutCleanup({ skipServer: expired });
+    } catch (error) {
+      console.warn('Sign-out cleanup failed:', error?.message || error);
+      await clearStoredSession().catch(() => {});
+    }
+
+    setAdminYouthView(false);
+    setCurrentUser(null);
+    setCurrentScreen('SignIn');
+    closeDrawer();
+
+    if (expired) {
+      Alert.alert('Session expired', 'Please sign in again.');
+    }
+  };
+
+  // On launch, restore the saved login instead of always starting at Sign In.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const stored = await loadStoredSession();
+        if (!stored) return;
+
+        let user = stored.user;
+        let checked = null;
+
+        if (!user) {
+          // A token without a saved profile: the server has to tell us who this is.
+          checked = await verifySession(stored.token);
+          if (checked.valid === false) await clearStoredSession();
+          if (checked.valid !== true) return;
+          user = checked.user;
+        }
+        if (cancelled) return;
+
+        setCurrentUser(user);
+        setCurrentScreen(isAdminUser(user) ? 'AdminDashboard' : 'Home');
+
+        // Make sure this phone's push token is on the server for this account.
+        registerForPushNotifications({ prompt: false, force: true }).catch((error) => {
+          console.warn('Push notification registration failed:', error?.message || error);
+        });
+
+        // Open the app right away, then confirm the login in the background.
+        if (!checked) {
+          verifySession(stored.token).then((result) => {
+            if (cancelled) return;
+            if (result.valid === false) {
+              performLogout({ expired: true });
+            } else if (result.valid === true) {
+              setCurrentUser((previous) => (previous ? { ...previous, ...result.user } : previous));
+            }
+          });
+        }
+      } catch (error) {
+        console.warn('Could not restore the saved session:', error?.message || error);
+      } finally {
+        if (!cancelled) setBooting(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on launch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Tapping a notification opens the right screen; keeps the push token fresh.
+  usePushLifecycle({
+    user: currentUser,
+    onOpenScreen: (screenName) => {
+      setDrawerOpen(false);
+      setCurrentScreen(screenName);
+    },
+  });
+
+  // ==========================================
   // LOGOUT
   // ==========================================
   const handleLogout = () => {
@@ -124,13 +221,8 @@ function AppContent() {
         {
           text: 'Log Out',
           style: 'destructive',
-          onPress: async () => {
-            unregisterPushNotifications().catch((error) => {
-              console.warn('Push notification cleanup failed:', error.message);
-            });
-            setCurrentUser(null);
-            setCurrentScreen('SignIn');
-            closeDrawer();
+          onPress: () => {
+            performLogout();
           },
         },
       ]
@@ -163,7 +255,7 @@ function AppContent() {
 
     setCurrentUser(user);
 
-    registerForPushNotifications().catch((error) => {
+    registerAfterSignIn().catch((error) => {
       // Push registration is optional; a network or permission issue must not block sign-in.
       console.warn('Push notification registration failed:', error.message);
     });
@@ -308,6 +400,23 @@ function AppContent() {
       <IntroScreen
         onFinish={() => setShowIntro(false)}
       />
+    );
+  }
+
+  // Wait until the saved login has been checked, so a signed-in user never
+  // sees the Sign In screen flash by.
+  if (booting) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: '#000000',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <ActivityIndicator size="large" color="#FFFFFF" />
+      </View>
     );
   }
 
