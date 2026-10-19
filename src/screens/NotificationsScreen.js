@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import * as Notifications from 'expo-notifications';
 import { useTheme } from '../context/ThemeContext';
 
 const API_URL = 'https://ikonek-app.onrender.com';
@@ -48,6 +49,12 @@ export default function NotificationsScreen({ navigation }) {
   }, []);
 
   useEffect(() => { loadNotifications(); }, [loadNotifications]);
+
+  // A push that arrives while this screen is open appears in the list right away.
+  useEffect(() => {
+    const subscription = Notifications.addNotificationReceivedListener(() => loadNotifications(true));
+    return () => subscription.remove();
+  }, [loadNotifications]);
 
   const markRead = useCallback(async (item) => {
     if (item.readAt) return;
