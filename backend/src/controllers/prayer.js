@@ -36,6 +36,33 @@ const cleanOptionalString = (value) => {
   return String(value).trim() || null;
 };
 
+// Tell every other account when a post is shared with the church.
+// Failure here must never undo a successful post.
+const notifyChurchOfJournalPost = async (post, authorId, authorName) => {
+  try {
+    const isDevotion = post.postType === "DEVOTION";
+    const who = authorName || "Someone";
+    const type = isDevotion ? "JOURNAL_DEVOTION" : "JOURNAL_PRAYER";
+    const title = isDevotion ? "New devotion shared" : "New prayer request";
+    const message = isDevotion
+      ? `${who} shared a devotion${post.devotionTitle ? `: ${post.devotionTitle}` : ""}.`
+      : `${who} shared a prayer request. Join in prayer.`;
+
+    const users = await prisma.user.findMany({
+      where: { id: { not: authorId } },
+      select: { id: true },
+    });
+    if (!users.length) return;
+
+    await prisma.notification.createMany({
+      data: users.map(({ id }) => ({ userId: id, type, title, message, relatedId: post.id })),
+    });
+    await sendPushToUsers(users.map(({ id }) => id), { type, title, message, relatedId: post.id });
+  } catch (error) {
+    console.error("Journal post notification error:", error.message);
+  }
+};
+
 const createPrayerRequest = async (req, res) => {
   try {
     const postType = String(req.body.postType || "PRAYER_REQUEST").toUpperCase();
@@ -75,6 +102,8 @@ const createPrayerRequest = async (req, res) => {
         testimony: null,
       },
     });
+
+    if (visibility === "CHURCH") await notifyChurchOfJournalPost(prayerRequest, req.user.userId, author?.name);
 
     return res.status(201).json({ success: true, message: "Journal post submitted successfully", prayerRequest });
   } catch (error) {
@@ -185,6 +214,11 @@ const updatePrayerRequest = async (req, res) => {
     }
 
     const prayerRequest = await prisma.prayerRequest.update({ where: { id }, data });
+    // A private post that is later shared with the church should notify everyone once.
+    if (existingRequest.visibility !== "CHURCH" && prayerRequest.visibility === "CHURCH") {
+      const author = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { name: true } });
+      await notifyChurchOfJournalPost(prayerRequest, req.user.userId, author?.name);
+    }
     if (data.status && data.status !== existingStatus && existingRequest.userId) {
       try {
         await prisma.notification.create({ data: {

@@ -98,7 +98,7 @@ export default function NotificationsScreen({ navigation }) {
       accessibilityLabel={`${item.title}${item.readAt ? ', read' : ', unread'}`}
     >
       <View style={[styles.itemIcon, { backgroundColor: item.readAt ? (isDarkMode ? '#1E293B' : '#F1F5F9') : '#DBEAFE' }]}>
-        <Ionicons name={item.type === 'BIRTHDAY' ? 'gift-outline' : item.type === 'EVENT' ? 'calendar-outline' : item.type === 'ANNOUNCEMENT' ? 'megaphone-outline' : item.type.startsWith('EVENT') ? 'calendar-outline' : item.type === 'ATTENDANCE_REMINDER' || item.type === 'ATTENDANCE_UPDATED' ? 'checkmark-circle-outline' : item.type === 'PRAYER_STATUS' ? 'heart-outline' : item.type === 'ACCOUNT_LINKED' ? 'sparkles-outline' : 'notifications-outline'} size={21} color={item.readAt ? muted : '#2563EB'} />
+        <Ionicons name={item.type === 'BIRTHDAY' ? 'gift-outline' : item.type === 'EVENT' ? 'calendar-outline' : item.type === 'ANNOUNCEMENT' ? 'megaphone-outline' : item.type.startsWith('EVENT') ? 'calendar-outline' : item.type === 'ATTENDANCE_REMINDER' || item.type === 'ATTENDANCE_UPDATED' ? 'checkmark-circle-outline' : item.type.startsWith('PRAYER') || item.type.startsWith('JOURNAL') ? 'heart-outline' : item.type === 'ACCOUNT_LINKED' ? 'sparkles-outline' : 'notifications-outline'} size={21} color={item.readAt ? muted : '#2563EB'} />
       </View>
       <View style={styles.itemContent}>
         <Text style={[styles.itemTitle, { color: foreground }]}>{item.title}</Text>
